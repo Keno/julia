@@ -1,2 +1,6 @@
+before_install:
+  - sudo apt-get update 
+  - sudo apt-get install gfortran
+
 script:
   - "make debug release"
