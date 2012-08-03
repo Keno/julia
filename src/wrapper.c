@@ -77,7 +77,7 @@ void closeHandle(uv_handle_t* handle)
 #endif
     jl_callback_call(JULIA_HOOK(close),handle->data,0);
     //TODO: maybe notify Julia handle to close itself
-    free(handle);
+    jl_aligned_free(handle);
 }
 
 
@@ -121,7 +121,7 @@ DLLEXPORT uv_async_t *jl_make_async(uv_loop_t *loop,jl_value_t *julia_struct)
 {
     if(!loop)
         return 0;
-    uv_async_t *async = malloc(sizeof(uv_async_t));
+    uv_async_t *async = jl_aligned_malloc(sizeof(uv_async_t));
     uv_async_init(loop,async,(uv_async_cb)&jl_asynccb);
     async->data=julia_struct;
     return async;
@@ -131,7 +131,7 @@ DLLEXPORT uv_timer_t *jl_make_timer(uv_loop_t *loop, jl_value_t *julia_struct)
 {
     if(!loop)
         return 0;
-    uv_timer_t *timer = malloc(sizeof(uv_timer_t));
+    uv_timer_t *timer = jl_aligned_malloc(sizeof(uv_timer_t));
     uv_timer_init(loop,timer);
     timer->data=julia_struct;
     return timer;
@@ -141,7 +141,7 @@ DLLEXPORT uv_idle_t *jl_idle_init(uv_loop_t *loop, jl_value_t *julia_struct)
 {
     if(!loop)
         return 0;
-    uv_idle_t *idle = malloc(sizeof(uv_idle_t));
+    uv_idle_t *idle = jl_aligned_malloc(sizeof(uv_idle_t));
     uv_idle_init(loop,idle);
     idle->data = julia_struct;
     return idle;
@@ -208,7 +208,7 @@ DLLEXPORT uv_process_t *jl_spawn(char *name, char **argv, uv_loop_t *loop,
 #ifdef __APPLE__
     char **environ = *_NSGetEnviron();
 #endif
-    uv_process_t *proc = malloc(sizeof(uv_process_t));
+    uv_process_t *proc = jl_aligned_malloc(sizeof(uv_process_t));
     uv_process_options_t opts;
     uv_stdio_container_t stdio[3];
     int error;
@@ -233,7 +233,7 @@ DLLEXPORT uv_process_t *jl_spawn(char *name, char **argv, uv_loop_t *loop,
     opts.exit_cb = &jl_return_spawn;
     error = uv_spawn(loop,proc,opts);
     if(error) {
-        free(proc);
+        jl_aligned_free(proc);
         jl_errorf("Failed to create process %s: %d",name,error);
     }
     proc->data = julia_struct;
@@ -336,7 +336,7 @@ void jl_free_buffer() {}
 DLLEXPORT int jl_putc(unsigned char c, uv_stream_t *stream)
 {
     if(stream->type<UV_HANDLE_TYPE_MAX) { //is uv handle
-        uv_write_t *uvw = malloc(sizeof(uv_write_t));
+        uv_write_t *uvw = jl_aligned_malloc(sizeof(uv_write_t));
         uv_buf_t buf[]  = {{.base = chars+c,.len=1}};
         return uv_write(uvw,stream,buf,1,&jl_free_buffer);
     } else {
@@ -348,7 +348,7 @@ DLLEXPORT int jl_putc(unsigned char c, uv_stream_t *stream)
 DLLEXPORT int jl_write(uv_stream_t *stream,char *str,size_t n)
 {
     if(stream->type<UV_HANDLE_TYPE_MAX) { //is uv handle
-        uv_write_t *uvw = malloc(sizeof(uv_write_t));
+        uv_write_t *uvw = jl_aligned_malloc(sizeof(uv_write_t));
         uv_buf_t buf[]  = {{.base = str,.len=n}};
         return uv_write(uvw,stream,buf,1,&jl_free_buffer);
     } else {
@@ -430,7 +430,7 @@ DLLEXPORT uv_tcp_t *jl_tcp_init(uv_loop_t* loop)
 {
     if(!loop)
         return NULL;
-    uv_tcp_t *tcp = malloc(sizeof(uv_tcp_t));
+    uv_tcp_t *tcp = jl_aligned_malloc(sizeof(uv_tcp_t));
     uv_tcp_init(loop,tcp);
     tcp->data=0;
     return tcp;
@@ -490,17 +490,17 @@ void jl_addinfo_cb(uv_getaddrinfo_t* handle, int status, struct addrinfo* res)
     if(handle->data)
     {
         jl_callback_call(((jl_handle_opts_t*)handle->data)->cb,2,CB_PTR,res,CB_INT32,status);
-        free(handle->data);
+        jl_aligned_free(handle->data);
 
     }
-    free(handle);
+    jl_aligned_free(handle);
     uv_freeaddrinfo(res);
 }
 
 DLLEXPORT int jl_getaddrinfo(uv_loop_t *loop, const char *host, const char *service, jl_function_t *cb)
 {
-    uv_getaddrinfo_t *req = malloc(sizeof(uv_getaddrinfo_t));
-    jl_handle_opts_t *opts = malloc(sizeof(jl_handle_opts_t));
+    uv_getaddrinfo_t *req = jl_aligned_malloc(sizeof(uv_getaddrinfo_t));
+    jl_handle_opts_t *opts = jl_aligned_malloc(sizeof(jl_handle_opts_t));
     struct addrinfo hints;
 
     memset (&hints, 0, sizeof (hints));
@@ -517,7 +517,7 @@ DLLEXPORT int jl_getaddrinfo(uv_loop_t *loop, const char *host, const char *serv
 
 DLLEXPORT struct sockaddr *jl_sockaddr_from_addrinfo(struct addrinfo *addrinfo)
 {
-    struct sockaddr*addr=malloc(sizeof(struct sockaddr));
+    struct sockaddr*addr=jl_aligned_malloc(sizeof(struct sockaddr));
     memcpy(addr,addrinfo->ai_addr,sizeof(struct sockaddr));
     return addr;
 }
@@ -536,7 +536,7 @@ DLLEXPORT void jl_sockaddr_set_port(struct sockaddr *addr,uint16_t port)
 
 DLLEXPORT int jl_connect_raw(uv_tcp_t *handle,struct sockaddr *addr,jl_function_t *connectcb)
 {
-    uv_connect_t *req = malloc(sizeof(uv_connect_t));
+    uv_connect_t *req = jl_aligned_malloc(sizeof(uv_connect_t));
     if(addr->sa_family==AF_INET)
     {
         return uv_tcp_connect(req,handle,*((struct sockaddr_in*)addr),&jl_connectcb);
@@ -558,7 +558,7 @@ DLLEXPORT char *jl_ios_buf_base(ios_t *ios)
 
 DLLEXPORT uv_lib_t *jl_wrap_raw_dl_handle(void *handle)
 {
-    uv_lib_t *lib = malloc(sizeof(uv_lib_t));
+    uv_lib_t *lib = jl_aligned_malloc(sizeof(uv_lib_t));
     lib->handle=handle;
     lib->errmsg=NULL;
     return lib;

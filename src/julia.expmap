@@ -1,5 +1,8 @@
 {
   global:
+    jl_aligned_malloc;
+	jl_aligned_realloc;
+	jl_aligned_free;
     int64hash;
     int64to32hash;
     memhash;

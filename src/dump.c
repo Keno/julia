@@ -799,7 +799,7 @@ void jl_restore_system_image(char *fname)
     ios_mem(&ss, 0);
     ios_copyuntil(&ss, &f, '\0');
     ios_close(&f);
-    if (fpath != fname) free(fpath);
+    if (fpath != fname) jl_aligned_free(fpath);
 
 #ifdef JL_GC_MARKSWEEP
     if (en) jl_gc_enable();

@@ -47,7 +47,7 @@ void add_finalizer(cvalue_t *cv)
 {
     if (nfinalizers == maxfinalizers) {
         size_t nn = (maxfinalizers==0 ? 256 : maxfinalizers*2);
-        cvalue_t **temp = (cvalue_t**)realloc(Finalizers, nn*sizeof(value_t));
+        cvalue_t **temp = (cvalue_t**)jl_aligned_realloc(Finalizers, nn*sizeof(value_t));
         if (temp == NULL)
             lerror(MemoryError, "out of memory");
         Finalizers = temp;
@@ -81,7 +81,7 @@ static void sweep_finalizers(void)
 #ifndef NDEBUG
                 memset(cv_data(tmp), 0xbb, cv_len(tmp));
 #endif
-                free(cv_data(tmp));
+                jl_aligned_free(cv_data(tmp));
             }
             ndel++;
         }
@@ -153,7 +153,7 @@ value_t cvalue(fltype_t *type, size_t sz)
             gc(0);
         pcv = (cvalue_t*)alloc_words(CVALUE_NWORDS);
         pcv->type = type;
-        pcv->data = malloc(sz);
+        pcv->data = jl_aligned_malloc(sz);
         autorelease(pcv);
         malloc_pressure += sz;
     }
@@ -225,14 +225,14 @@ int fl_isstring(value_t v)
     return (iscvalue(v) && cv_isstr((cvalue_t*)ptr(v)));
 }
 
-// convert to malloc representation (fixed address)
+// convert to jl_aligned_malloc representation (fixed address)
 void cv_pin(cvalue_t *cv)
 {
     if (!isinlined(cv))
         return;
     size_t sz = cv_len(cv);
     if (cv_isstr(cv)) sz++;
-    void *data = malloc(sz);
+    void *data = jl_aligned_malloc(sz);
     memcpy(data, cv_data(cv), sz);
     cv->data = data;
     autorelease(cv);
@@ -583,7 +583,7 @@ value_t cvalue_copy(value_t v)
     if (!isinlined(cv)) {
         size_t len = cv_len(cv);
         if (cv_isstr(cv)) len++;
-        ncv->data = malloc(len);
+        ncv->data = jl_aligned_malloc(len);
         memcpy(ncv->data, cv_data(cv), len);
         autorelease(ncv);
         if (hasparent(cv)) {
@@ -792,7 +792,7 @@ value_t fl_builtin(value_t *args, u_int32_t nargs)
 
 value_t cbuiltin(char *name, builtin_t f)
 {
-    cvalue_t *cv = (cvalue_t*)malloc(CVALUE_NWORDS * sizeof(value_t));
+    cvalue_t *cv = (cvalue_t*)jl_aligned_malloc(CVALUE_NWORDS * sizeof(value_t));
     cv->type = builtintype;
     cv->data = &cv->_space[0];
     cv->len = sizeof(value_t);

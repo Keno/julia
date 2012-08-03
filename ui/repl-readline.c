@@ -68,6 +68,7 @@ static void init_history(void) {
             }
             if (j == i+1) continue;
             first->line = (char*)realloc(first->line, length);
+			assert(first->line);
             char *p = strchr(first->line, '\0');
             for (k = i+1; k < j; k++) {
                 *p = '\n';

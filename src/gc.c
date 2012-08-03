@@ -235,7 +235,7 @@ static void *alloc_big(size_t sz)
     size_t offs = BVOFFS*sizeof(void*);
     if (sz + offs < offs)  // overflow in adding offs, size was "negative"
         jl_raise(jl_memory_exception);
-    bigval_t *v = (bigval_t*)malloc(sz + offs);
+    bigval_t *v = (bigval_t*)jl_aligned_malloc(sz + offs);
     if (v == NULL)
         jl_raise(jl_memory_exception);
 #if defined(MEMDEBUG) || defined(MEMPROFILE)
@@ -262,7 +262,7 @@ static void sweep_big(void)
 #ifdef MEMDEBUG
             memset(v, 0xbb, v->sz+BVOFFS*sizeof(void*));
 #endif
-            free(v);
+            jl_aligned_free(v);
         }
         v = nxt;
     }
@@ -272,7 +272,7 @@ jl_mallocptr_t *jl_gc_acquire_buffer(void *b)
 {
     jl_mallocptr_t *mp;
     if (malloc_ptrs_freelist == NULL) {
-        mp = malloc(sizeof(jl_mallocptr_t));
+        mp = jl_aligned_malloc(sizeof(jl_mallocptr_t));
     }
     else {
         mp = malloc_ptrs_freelist;
@@ -291,7 +291,7 @@ jl_mallocptr_t *jl_gc_managed_malloc(size_t sz)
         jl_gc_collect();
     }
     sz = (sz+3) & -4;
-    void *b = malloc(sz);
+    void *b = jl_aligned_malloc(sz);
     if (b == NULL)
         jl_raise(jl_memory_exception);
     allocd_bytes += sz;
@@ -311,7 +311,7 @@ static void sweep_malloc_ptrs(void)
         else {
             *pmp = nxt;
             if (mp->ptr)
-                free(mp->ptr);
+                jl_aligned_free(mp->ptr);
             mp->next = malloc_ptrs_freelist;
             malloc_ptrs_freelist = mp;
         }
@@ -321,7 +321,7 @@ static void sweep_malloc_ptrs(void)
 
 static void add_page(pool_t *p)
 {
-    gcpage_t *pg = malloc(sizeof(gcpage_t));
+    gcpage_t *pg = jl_aligned_malloc(sizeof(gcpage_t));
     if (pg == NULL)
         jl_raise(jl_memory_exception);
     gcval_t *v = (gcval_t*)&pg->data[0];
@@ -385,8 +385,8 @@ static void sweep_pool(pool_t *p)
             v = (gcval_t*)((char*)v + osize);
         }
         gcpage_t *nextpg = pg->next;
-        // lazy version: (empty) if the whole page was already unused, free it
-        // eager version: (freedall) free page as soon as possible
+        // lazy version: (empty) if the whole page was already unused, jl_aligned_free it
+        // eager version: (freedall) jl_aligned_free page as soon as possible
         // the eager one uses less memory.
         if (freedall) {
             pfl = prev_pfl;
@@ -394,7 +394,7 @@ static void sweep_pool(pool_t *p)
 #ifdef MEMDEBUG
             memset(pg, 0xbb, sizeof(gcpage_t));
 #endif
-            free(pg);
+            jl_aligned_free(pg);
         }
         else {
             ppg = &pg->next;

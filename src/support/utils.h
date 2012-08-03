@@ -1,6 +1,10 @@
 #ifndef UTILS_H
 #define UTILS_H
 
+DLLEXPORT void *jl_aligned_malloc(size_t size);
+DLLEXPORT void jl_aligned_free(void *memblock);
+DLLEXPORT void *jl_aligned_realloc(void *memblock, size_t size);
+
 DLLEXPORT int double_exponent(double d);
 void snprint_real(char *s, size_t cnt, double r,
                   int width,    // printf field width, or 0

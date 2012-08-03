@@ -322,7 +322,7 @@ jl_value_t *jl_readuntil(ios_t *s, uint8_t delim)
 
 void jl_free2(void *p, void *hint)
 {
-    free(p);
+    jl_aligned_free(p);
 }
 
 // -- syscall utilities --
@@ -509,7 +509,7 @@ static void *run_io_thr(void *arg)
 
         size_t nw;
         _os_write_all(r->fd, buf, n, &nw);
-        free(buf);
+        jl_aligned_free(buf);
 
         pthread_mutex_lock(&q_mut);
         r->next = ioq_freelist;
@@ -559,7 +559,7 @@ DLLEXPORT void jl_enq_send_req(ios_t *dest, ios_t *buf, int now)
         ioq_freelist = ioq_freelist->next;
     }
     else {
-        req = (sendreq_t*)malloc(sizeof(sendreq_t));
+        req = (sendreq_t*)jl_aligned_malloc(sizeof(sendreq_t));
     }
     req->fd = dest->fd;
     req->buf = buf;

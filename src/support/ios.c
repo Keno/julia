@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <malloc.h>
 #include <stdarg.h>
 #include <string.h>
 #include <assert.h>
@@ -10,7 +11,6 @@
 #include "dtypes.h"
 
 #ifdef WIN32
-#include <malloc.h>
 #include <io.h>
 #include <fcntl.h>
 #define fileno _fileno
@@ -161,7 +161,7 @@ static char *_buf_realloc(ios_t *s, size_t sz)
     if (sz <= s->maxsize) return s->buf;
 
     if (s->ownbuf && s->buf != &s->local[0]) {
-        // if we own the buffer we're free to resize it
+        // if we own the buffer we're jl_aligned_free to resize it
         // always allocate 1 bigger in case user wants to add a NUL
         // terminator after taking over the buffer
         temp = LLT_REALLOC(s->buf, sz+1);
@@ -828,14 +828,14 @@ ios_t *ios_stderr = NULL;
 
 void ios_init_stdstreams(void)
 {
-    ios_stdin = malloc(sizeof(ios_t));
+    ios_stdin = jl_aligned_malloc(sizeof(ios_t));
     ios_fd(ios_stdin, STDIN_FILENO, 0, 0);
 
-    ios_stdout = malloc(sizeof(ios_t));
+    ios_stdout = jl_aligned_malloc(sizeof(ios_t));
     ios_fd(ios_stdout, STDOUT_FILENO, 0, 0);
     ios_stdout->bm = bm_line;
 
-    ios_stderr = malloc(sizeof(ios_t));
+    ios_stderr = jl_aligned_malloc(sizeof(ios_t));
     ios_fd(ios_stderr, STDERR_FILENO, 0, 0);
     ios_stderr->bm = bm_none;
 }
@@ -1023,4 +1023,14 @@ int ios_printf(ios_t *s, const char *format, ...)
     c = ios_vprintf(s, format, args);
     va_end(args);
     return c;
+}
+
+DLLEXPORT void *jl_aligned_malloc(size_t size) {
+    return _aligned_malloc(size, 16);
+}
+DLLEXPORT void jl_aligned_free(void *memblock) {
+    _aligned_free(memblock);
+}
+DLLEXPORT void *jl_aligned_realloc(void *memblock, size_t size) {
+    return _aligned_realloc(memblock, size, 16);
 }

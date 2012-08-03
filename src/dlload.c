@@ -54,7 +54,7 @@ uv_lib_t *jl_load_dynamic_library(char *modname)
     char *ext;
     char path[PATHBUF];
     int i;
-    uv_lib_t *handle=malloc(sizeof(uv_lib_t));
+    uv_lib_t *handle=jl_aligned_malloc(sizeof(uv_lib_t));
     handle->errmsg=NULL;
 
     if (modname == NULL) {
@@ -104,7 +104,7 @@ uv_lib_t *jl_load_dynamic_library(char *modname)
     //JL_PRINTF(JL_STDERR, "could not load module %s (%d): %s\n", modname, error, uv_dlerror(handle));
     jl_errorf("could not load module %s: %s", modname, uv_dlerror(handle));
     uv_dlclose(handle);
-    free(handle);
+    jl_aligned_free(handle);
     return NULL;
 done:
     return handle;

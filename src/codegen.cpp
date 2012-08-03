@@ -2291,7 +2291,7 @@ extern "C" void jl_init_codegen(void)
     jl_ExecutionEngine->addGlobalMapping(value_to_pointer_func,
                                          (void*)&jl_value_to_pointer);
 
-    temp_arg_area = (char*)malloc(arg_area_sz);
+    temp_arg_area = (char*)jl_aligned_malloc(arg_area_sz);
     arg_area_loc = 0;
 
     std::vector<Type*> noargs(0);

@@ -50,7 +50,7 @@ vasprintf(char **str, const char *fmt, va_list ap)
         size_t len;
 
         VA_COPY(ap2, ap);
-        if ((string = malloc(INIT_SZ)) == NULL)
+        if ((string = jl_aligned_malloc(INIT_SZ)) == NULL)
                 goto fail;
 
         ret = vsnprintf(string, INIT_SZ, fmt, ap2);
@@ -58,10 +58,10 @@ vasprintf(char **str, const char *fmt, va_list ap)
                 *str = string;
         } else if (ret == INT_MAX || ret < 0) { /* Bad length */
                 goto fail;
-        } else {        /* bigger than initial, realloc allowing for nul */
+        } else {        /* bigger than initial, jl_aligned_realloc allowing for nul */
                 len = (size_t)ret + 1;
-                if ((newstr = realloc(string, len)) == NULL) {
-                        free(string);
+                if ((newstr = jl_aligned_realloc(string, len)) == NULL) {
+                        jl_aligned_free(string);
                         goto fail;
                 } else {
                         va_end(ap2);
@@ -70,7 +70,7 @@ vasprintf(char **str, const char *fmt, va_list ap)
                         if (ret >= 0 && (size_t)ret < len) {
                                 *str = newstr;
                         } else { /* failed with realloc'ed string, give up */
-                                free(newstr);
+                                jl_aligned_free(newstr);
                                 goto fail;
                         }
                 }

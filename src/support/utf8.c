@@ -603,7 +603,7 @@ size_t u8_vprintf(const char *fmt, va_list ap)
     if ((ssize_t)cnt < 0)
         return 0;
     if (cnt >= sz) {
-        buf = (char*)malloc(cnt + 1);
+        buf = (char*)jl_aligned_malloc(cnt + 1);
         needfree = 1;
         vsnprintf(buf, cnt+1, fmt, ap);
     }
@@ -611,7 +611,7 @@ size_t u8_vprintf(const char *fmt, va_list ap)
     nc = u8_toucs(wcs, cnt+1, buf, cnt);
     wcs[nc] = 0;
     printf("%ls", (wchar_t*)wcs);
-    if (needfree) free(buf);
+    if (needfree) jl_aligned_free(buf);
     return nc;
 }
 

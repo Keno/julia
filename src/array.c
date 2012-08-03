@@ -142,7 +142,7 @@ jl_array_t *jl_reshape_array(jl_type_t *atype, jl_array_t *data,
     return a;
 }
 
-// own_buffer != 0 iff GC should call free() on this pointer eventually
+// own_buffer != 0 iff GC should call jl_aligned_free() on this pointer eventually
 jl_array_t *jl_ptr_to_array_1d(jl_type_t *atype, void *data, size_t nel,
                                int own_buffer)
 {

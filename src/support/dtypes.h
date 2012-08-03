@@ -74,9 +74,9 @@
 #define VA_NARG(...) VA_NARG_(__VA_ARGS__,VA_RSEQ_N())
 #endif
 
-#define LLT_ALLOC(n) malloc(n)
-#define LLT_REALLOC(p,n) realloc((p),(n))
-#define LLT_FREE(x) free(x)
+#define LLT_ALLOC(n) jl_aligned_malloc(n)
+#define LLT_REALLOC(p,n) jl_aligned_realloc((p),(n))
+#define LLT_FREE(x) jl_aligned_free(x)
 
 typedef int bool_t;
 

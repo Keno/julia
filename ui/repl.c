@@ -88,10 +88,10 @@ void parse_opts(int *argcp, char ***argvp) {
         if (julia_home) {
             julia_home = strdup(julia_home);
         } else {
-            char *julia_path = (char*)malloc(PATH_MAX);
+            char *julia_path = (char*)jl_aligned_malloc(PATH_MAX);
             get_exename(julia_path, PATH_MAX);
             julia_home = strdup(dirname(julia_path));
-            free(julia_path);
+            jl_aligned_free(julia_path);
         }
     }
     *argvp += ind;
@@ -223,8 +223,8 @@ static void print_profile(void)
 uv_buf_t *jl_alloc_read_buffer(uv_handle_t* handle, size_t suggested_size)
 {
     if(suggested_size>512) suggested_size = 512; //Readline has a max buffer of 512
-    char *buf = malloc(suggested_size);
-    uv_buf_t *ret = malloc(sizeof(uv_buf_t));
+    char *buf = jl_aligned_malloc(suggested_size);
+    uv_buf_t *ret = jl_aligned_malloc(sizeof(uv_buf_t));
     *ret = uv_buf_init(buf,suggested_size);
     return ret;
 }

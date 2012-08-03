@@ -204,13 +204,13 @@ void *init_stdio_handle(uv_file fd,int readable)
     switch(type)
     {
         case UV_TTY:
-            handle = malloc(sizeof(uv_tty_t));
+            handle = jl_aligned_malloc(sizeof(uv_tty_t));
             uv_tty_init(jl_io_loop,(uv_tty_t*)handle,fd,readable);
             ((uv_tty_t*)handle)->data=0;
             uv_tty_set_mode((void*)handle,1); //raw stdio
             break;
         case UV_NAMED_PIPE:
-            handle = malloc(sizeof(uv_pipe_t));
+            handle = jl_aligned_malloc(sizeof(uv_pipe_t));
             uv_pipe_init(jl_io_loop,(uv_pipe_t*)handle,0);
             uv_pipe_open((uv_pipe_t*)handle,fd);
             ((uv_pipe_t*)handle)->data=0;
@@ -336,7 +336,7 @@ void julia_init(char *imageFile)
     stack_t ss;
     ss.ss_flags = 0;
     ss.ss_size = SIGSTKSZ;
-    ss.ss_sp = malloc(ss.ss_size);
+    ss.ss_sp = jl_aligned_malloc(ss.ss_size);
     if (sigaltstack(&ss, NULL) < 0) {
         JL_PRINTF(JL_STDERR, "sigaltstack: %s\n", strerror(errno));
         jl_exit(1);

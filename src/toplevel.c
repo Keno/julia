@@ -346,7 +346,7 @@ void jl_load(const char *fname)
     }
     jl_start_parsing_file(fpath);
     jl_parse_eval_all(fpath);
-    if (fpath != fname) free(fpath);
+    if (fpath != fname) jl_aligned_free(fpath);
 }
 
 // load from filename given as a ByteString object

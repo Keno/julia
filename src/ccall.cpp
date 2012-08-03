@@ -23,7 +23,7 @@ static void restore_arg_area_loc(uint64_t l)
     uint32_t ab = l>>32;
     while (arg_block_n > ab) {
         arg_block_n--;
-        free(temp_arg_blocks[arg_block_n]);
+        jl_aligned_free(temp_arg_blocks[arg_block_n]);
     }
 }
 
@@ -34,7 +34,7 @@ static void *alloc_temp_arg_space(uint32_t sz)
 #ifdef JL_GC_MARKSWEEP
         if (arg_block_n >= N_TEMP_ARG_BLOCKS)
             jl_error("ccall: out of temporary argument space");
-        p = malloc(sz);
+        p = jl_aligned_malloc(sz);
         temp_arg_blocks[arg_block_n++] = p;
 #else
 #error "fixme"
@@ -116,7 +116,8 @@ static Value *julia_to_native(Type *ty, jl_value_t *jt, Value *jv,
             if (ty->isPointerTy() && ty->getContainedType(0)==vt) {
                 // pass the address of an alloca'd thing, not a box
                 // since those are immutable.
-                Value *slot = builder.CreateAlloca(vt);
+                AllocaInst *slot = builder.CreateAlloca(vt);
+                slot->setAlignment(16);
                 builder.CreateStore(jv, slot);
                 return builder.CreateBitCast(slot, ty);
             }
