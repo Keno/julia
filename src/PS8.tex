@@ -1,0 +1,26 @@
+\title{Physics 143b: Problem Set 8}
+\include{prelude}
+\maketitle
+
+\section*{Problem 1}
+We start with the state
+\[
+| t \rangle = \frac{1}{\sqrt{2}} (|z,+\rangle|z,-\rangle + |z,-\rangle|z,+\rangle )
+\]
+
+\newcommand{\t2}{\frac{\theta}{2}}
+\newcommand{\np}{|n,+\rangle}
+\newcommand{\nm}{|n,-\rangle}
+\newcommand{\fsq}{\frac{1}{\sqrt{2}}}
+\subsection*{a)}
+Writing it in the $|n,\pm\rangle$ basis, we obtain
+\[
+|t\rangle_n = \frac{1}{\sqrt{2}} \left( \left[ \cos(\t2) \np - \sin(\t2) \nm \right] \tensor \left[ \sin(\t2) \np + \cos(\t2) \nm \right] + \left[ \sin(\t2) \np + \cos(\t2) \nm ] \tensor \left[ \cos(\t2) \np - \sin(\t2) \nm] \right)
+\]\[
+= \fsq \left[ \cos^2(\t2) - \sin^2(\t2) \right] \np\nm \left[
+-\sin^2(\t2) + \cos^2(\t2) \right] \nm\np + 2\sin(\t2)\cos(\t2)\left[ \np\np - \nm\nm \right]
+\]\[
+= \fsq \left[ \cos^2(\t2) - \sin^2(\t2) \right] \left( \np\nm + \nm\np \right) + 2\sin(\t2)\cos(\t2)\left[ \np\np - \nm\nm \right]
+\]
+
+\end{document}
