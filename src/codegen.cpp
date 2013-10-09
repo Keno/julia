@@ -3762,6 +3762,11 @@ extern "C" void jl_init_codegen(void)
                                          (void*)&restore_arg_area_loc);
 }
 
+DLLEXPORT void *jl_get_llvm_module()
+{
+    return jl_Module;
+}
+
 /*
 maybe this reads the dwarf info for a MachineFunction:
 
