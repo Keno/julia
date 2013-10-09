@@ -846,6 +846,8 @@ DLLEXPORT size_t jl_sizeof_uv_stream_t();
 DLLEXPORT size_t jl_sizeof_uv_pipe_t();
 DLLEXPORT int jl_sizeof_ios_t();
 
+DLLEXPORT void *jl_get_llvm_module();
+
 #ifdef _OS_WINDOWS_
 DLLEXPORT struct tm* localtime_r(const time_t *t, struct tm *tm);
 #endif

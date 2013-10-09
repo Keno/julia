@@ -115,9 +115,22 @@ t_func[eval(Core.Intrinsics,:ccall)] =
     (3, Inf, (fptr, rt, at, a...)->(is(rt,Type{Void}) ? Nothing :
                                     isType(rt) ? rt.parameters[1] : Any))
 t_func[eval(Core.Intrinsics,:llvmcall)] =
-    (3, Inf, (fptr, rt, at, a...)->(is(rt,Type{Void}) ? Nothing :
-                                    isType(rt) ? rt.parameters[1] : 
-                                    isa(rt,Tuple) ? map(x->x.parameters[1],rt) : Any))
+(3, Inf,function(args, a...)
+    fptr, rt, at = args
+    if rt === Type{Void}
+        return Nothing
+    elseif isa(rt,Type) 
+        if isa(rt,Tuple)
+            return map(x->x.parameters[1],rt)
+        else
+            return rt.parameters[1]
+        end
+    elseif isa(rt,Tuple) && isa(rt[1],Function)
+        return rt[1](rt[2:end]...,a[4:end]...)
+    else 
+        return Any
+    end
+end)
 t_func[eval(Core.Intrinsics,:cglobal)] =
     (1, 2, (fptr, t...)->(isempty(t) ? Ptr{Void} :
                           isType(t[1]) ? Ptr{t[1].parameters[1]} : Ptr))
@@ -437,7 +450,7 @@ function builtin_tfunction(f::ANY, args::ANY, argtypes::ANY)
         return None
     end
     if is(f,typeassert) || is(f,tupleref) || is(f,getfield) ||
-       is(f,apply_type) || is(f,fieldtype)
+       is(f,apply_type) || is(f,fieldtype) || is(f,Base.Intrinsics.llvmcall)
         # TODO: case of apply(), where we do not have the args
         return tf[3](args, argtypes...)
     end
