@@ -14,14 +14,21 @@ FLAGS = \
 	-Wall -Wno-strict-aliasing -fno-omit-frame-pointer \
 	-Iflisp -Isupport -fvisibility=hidden -fno-common \
 	-I$(call exec,$(LLVM_CONFIG) --includedir) \
-	-I$(LIBUV_INC) -I$(JULIAHOME)/usr/include
+	-I$(LIBUV_INC) -I$(JULIAHOME)/usr/include \
+	-I$(JULIAHOME)/deps/llvm-3.3/tools/clang/lib
 
 LLVMLINK = $(call exec,$(LLVM_CONFIG) --libs)
 ifeq ($(USE_LLVM_SHLIB),1)
 LLVMLINK = -lLLVM-$(LLVM_VER)
 endif
 
-LIBS = $(WHOLE_ARCHIVE) $(JULIAHOME)/src/flisp/libflisp.a $(WHOLE_ARCHIVE) $(JULIAHOME)/src/support/libsupport.a -L$(BUILD)/lib $(LIBUV) $(NO_WHOLE_ARCHIVE) $(call exec,$(LLVM_CONFIG) --ldflags) $(LLVMLINK) $(OSLIBS)
+CLANG_LIBS = -lclangFrontendTool -lclangBasic -lclangLex -lclangDriver -lclangFrontend -lclangParse \
+    -lclangAST -lclangASTMatchers -lclangSema -lclangAnalysis -lclangEdit \
+    -lclangRewriteFrontend -lclangRewriteCore -lclangSerialization -lclangStaticAnalyzerCheckers \
+    -lclangStaticAnalyzerCore -lclangStaticAnalyzerFrontend -lclangTooling \
+    -lclangCodeGen -lclangARCMigrate -lclang 
+
+LIBS = $(WHOLE_ARCHIVE) $(JULIAHOME)/src/flisp/libflisp.a $(WHOLE_ARCHIVE) $(JULIAHOME)/src/support/libsupport.a -L$(BUILD)/lib $(LIBUV) $(CLANG_LIBS) $(NO_WHOLE_ARCHIVE) $(call exec,$(LLVM_CONFIG) --ldflags) $(LLVMLINK) $(OSLIBS)
 
 ifneq ($(MAKECMDGOALS),debug)
 TARGET =
