@@ -57,8 +57,6 @@ static clang::CanQualType cT_float64;
 static clang::CanQualType cT_void;
 static clang::CanQualType cT_pvoid;
 
-static bool isInitialized = false;
-
 class JuliaCodeGenerator : public clang::ASTConsumer {
   public:
     JuliaCodeGenerator() {}
@@ -116,35 +114,26 @@ struct FooBar {
   unsigned FormatInMemoryUniqueId;
 };
 
-class JuliaCodeGenAction : public clang::ASTFrontendAction {
-public:
-  virtual clang::ASTConsumer *CreateASTConsumer(clang::CompilerInstance &CI,
-                                         StringRef InFile) {
-    printf("test");
-    return new JuliaCodeGenerator();
-  }
-
-public:
-  JuliaCodeGenAction() {}
-
-  virtual bool hasCodeCompletionSupport() const { return false; }
-  virtual clang::TranslationUnitKind getTranslationUnitKind()  { return clang::TU_Prefix; }
-};
-
 DLLEXPORT extern "C" void init_header(char *name)
 {
     clang::FileManager &fm = clang_compiler->getFileManager();
     clang::Preprocessor &pp = clang_compiler->getPreprocessor();
-    //pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory("/usr/include"),clang::SrcMgr::C_System,false),true);
-    //#define DIR(X) pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory(X),clang::SrcMgr::C_User,false),false);
-    //DIR("/Users/kfischer/julia/src/support")
-    //DIR("/Users/kfischer/julia/usr/include")
-    //DIR("/Users/kfischer/julia/deps/llvm-3.3/tools/clang/include/")
+    clang::HeaderSearchOptions &opts = pp.getHeaderSearchInfo().getHeaderSearchOpts();
+    opts.UseBuiltinIncludes = 1;
+    opts.UseStandardSystemIncludes = 1;
+    opts.UseStandardCXXIncludes = 1;
+    pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory("/usr/include"),clang::SrcMgr::C_System,false),true);
+    pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory("/Users/kfischer/julia/usr/lib/clang/3.3/include/"),clang::SrcMgr::C_System,false),true);
+    #define DIR(X) pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory(X),clang::SrcMgr::C_User,false),false);
+    DIR("/Users/kfischer/julia/src/support")
+    DIR("/Users/kfischer/julia/usr/include")
+    DIR("/Users/kfischer/julia/deps/llvm-3.3/tools/clang/include/")
+    clang_compiler->getDiagnosticClient().BeginSourceFile(clang_compiler->getLangOpts(), 0);
+    pp.getBuiltinInfo().InitializeBuiltins(pp.getIdentifierTable(),
+                                           clang_compiler->getLangOpts());
     clang::FrontendInputFile fi = clang::FrontendInputFile(name,clang::IK_CXX);
-    JuliaCodeGenAction *a = new JuliaCodeGenAction;
-    clang_compiler->getFrontendOpts().Inputs.push_back(fi);
-    //clang_compiler->InitializeSourceManager(fi);
-    clang_compiler->ExecuteAction(*a);
+    clang_compiler->InitializeSourceManager(fi);
+    clang::ParseAST(clang_compiler->getSema());
 }
 
 
@@ -153,6 +142,11 @@ DLLEXPORT extern "C" void init_julia_clang_env(void *module) {
     clang_compiler = new clang::CompilerInstance;
     clang_compiler->createDiagnostics();
     clang_compiler->getLangOpts().CPlusPlus = 1;
+    clang_compiler->getLangOpts().LineComment = 1;
+    clang_compiler->getLangOpts().Bool = 1;
+    clang_compiler->getLangOpts().WChar = 1;
+    clang_compiler->getLangOpts().C99 = 1;
+    clang_compiler->getLangOpts().ImplicitInt = 0;
     clang_compiler->getTargetOpts().Triple = "x86_64-apple-darwin12.4.0";
     clang::TargetInfo *tin = clang::TargetInfo::CreateTargetInfo(clang_compiler->getDiagnostics(), &clang_compiler->getTargetOpts());
     clang_compiler->setTarget(tin);
@@ -199,18 +193,12 @@ DLLEXPORT extern "C" void init_julia_clang_env(void *module) {
     cT_void = clang_astcontext->VoidTy;
 
     cT_pvoid = clang_astcontext->getPointerType(cT_void);
-
-    init_header("test2.h");
 }
 
-DLLEXPORT extern "C" void *setup_cpp_env(void *module, void *jlfunc, void *decl)
+DLLEXPORT extern "C" void *setup_cpp_env(void *module, void *jlfunc)
 {
-    const clang::Decl* MD = ((const clang::Decl *)decl);
-    clang_astcontext = &MD->getASTContext();
 
     llvm::Function *w = (Function *)jlfunc;
-
-
 
     BasicBlock &b0 = w->getEntryBlock();
 
@@ -244,7 +232,7 @@ DLLEXPORT extern "C" void cleanup_cpp_env(void *alloca_bb_ptr, void *decl)
 DLLEXPORT extern "C" void emit_cpp_new(void *type)
 {
     clang::Decl* MD = ((clang::Decl *)type);
-    clang::TypeDecl* cdecl = dyn_cast<clang::TypeDecl>(MD);
+    clang::CXXRecordDecl* cdecl = dyn_cast<clang::CXXRecordDecl>(MD);
     clang::FunctionDecl *OperatorNew = NULL;
     clang::FunctionDecl *OperatorDelete = NULL;
 
@@ -266,7 +254,19 @@ DLLEXPORT extern "C" void emit_cpp_new(void *type)
         clang::SourceRange(),
         NULL,                       //Array Size
         clang::CXXNewExpr::NoInit,  //Initialization Style
-        NULL,                       //Initializer
+        clang::CXXConstructExpr::Create(
+            astctx,
+            ty,
+            clang::SourceLocation(),
+            sema.LookupDefaultConstructor(cdecl),
+            false,
+            ArrayRef< clang::Expr * >(),
+            false,
+            false,
+            false,
+            clang::CXXConstructExpr::CK_Complete,
+            clang::SourceRange()
+        ),                       //Initializer
         astctx.getPointerType(ty),  //Allocated Type
         NULL,                       //Type Source Info
         clang::SourceRange(),
@@ -307,20 +307,22 @@ DLLEXPORT extern "C" void *get_nth_argument(Function *f, size_t n)
     return NULL;
 }
 
+DLLEXPORT extern "C" void *create_extract_value(Value *agg, size_t idx)
+{
+    return clang_cgf->Builder.CreateExtractValue(agg,ArrayRef<unsigned>((unsigned)idx));
+}
+
 DLLEXPORT extern "C" void *lookup_name(char *name, clang::Decl *decl)
 {
     clang::Sema &sema = clang_compiler->getSema();
     clang::LookupResult R(sema, clang::DeclarationName(&clang_astcontext->Idents.get(name)), clang::SourceLocation(), clang::Sema::LookupAnyName);
     sema.LookupQualifiedName(R, dyn_cast<clang::DeclContext>(decl), false);
-    return R.getAsSingle<clang::Decl>();
+    return R.empty() ? NULL : R.getRepresentativeDecl();
 }
 
-DLLEXPORT extern "C" void *lookup_toplevel_name(char *name, clang::Decl *decl)
+DLLEXPORT extern "C" void *tu_decl()
 {
-    clang::Sema &sema = clang_compiler->getSema();
-    clang::LookupResult R(sema, clang::DeclarationName(&clang_astcontext->Idents.get(name)), clang::SourceLocation(), clang::Sema::LookupAnyName);
-    sema.LookupName(R, sema.TUScope, false);
-    return R.getAsSingle<clang::Decl>();
+    return clang_astcontext->getTranslationUnitDecl();
 }
 
 DLLEXPORT extern "C" void *get_primary_dc(clang::DeclContext *dc)
@@ -390,7 +392,14 @@ DLLEXPORT extern "C" void emit_cpp_call(void *cppfunc, Value **args, size_t narg
     }
     else
     {
-        for (size_t i = 0; i < nargs; ++i, ++it)
+        size_t i = 0;
+        if(isa<clang::CXXMethodDecl>(fdecl))
+        {
+            clang::CXXMethodDecl *cxx = dyn_cast<clang::CXXMethodDecl>(fdecl);
+            if(!cxx->isStatic())
+                argvals.add(clang::CodeGen::RValue::get(args[i++]),cxx->getThisType(astctx));
+        }
+        for (; i < nargs; ++i, ++it)
             argvals.add(clang::CodeGen::RValue::get(args[i]),(*it)->getOriginalType());
     }
 
@@ -438,7 +447,7 @@ DLLEXPORT extern "C" void emit_cpp_call(void *cppfunc, Value **args, size_t narg
         clang_cgf->Builder.CreateRet(clang_cgf->Builder.CreateBitCast(ret,clang_cgf->CurFn->getReturnType()));
 
     clang_cgm->Release();
-    sema.PerformPendingInstantiations();
+    sema.PerformPendingInstantiations(false);
 }
 
 DLLEXPORT extern "C" void *clang_get_instance()
