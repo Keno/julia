@@ -127,10 +127,12 @@ DLLEXPORT extern "C" void init_header(char *name)
     #define DIR(X) pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory(X),clang::SrcMgr::C_User,false),false);
     DIR("/Users/kfischer/julia/src/support")
     DIR("/Users/kfischer/julia/usr/include")
+    DIR("/Users/kfischer/julia/deps/llvm-3.3/tools/clang/")
     DIR("/Users/kfischer/julia/deps/llvm-3.3/tools/clang/include/")
     clang_compiler->getDiagnosticClient().BeginSourceFile(clang_compiler->getLangOpts(), 0);
     pp.getBuiltinInfo().InitializeBuiltins(pp.getIdentifierTable(),
                                            clang_compiler->getLangOpts());
+    pp.enableIncrementalProcessing();
     clang::FrontendInputFile fi = clang::FrontendInputFile(name,clang::IK_CXX);
     clang_compiler->InitializeSourceManager(fi);
     clang::ParseAST(clang_compiler->getSema());
@@ -223,6 +225,9 @@ DLLEXPORT extern "C" void *setup_cpp_env(void *module, void *jlfunc)
 
 DLLEXPORT extern "C" void cleanup_cpp_env(void *alloca_bb_ptr, void *decl)
 {
+    clang_compiler->getSema().PerformPendingInstantiations(false);
+    clang_cgm->Release();
+
     // cleanup the environment
     clang_cgf->AllocaInsertPt = 0; // free this ptr reference
     if (alloca_bb_ptr)
@@ -298,11 +303,10 @@ DLLEXPORT extern "C" void *get_nth_argument(Function *f, size_t n)
 {
     size_t i = 0;
     Function::arg_iterator AI = clang_cgf->CurFn->arg_begin();
-    for (; AI != clang_cgf->CurFn->arg_end(); ++AI)
+    for (; AI != clang_cgf->CurFn->arg_end(); ++i, ++AI)
     {  
         if (i == n)
             return AI++;
-        AI++;
     }
     return NULL;
 }
@@ -312,11 +316,25 @@ DLLEXPORT extern "C" void *create_extract_value(Value *agg, size_t idx)
     return clang_cgf->Builder.CreateExtractValue(agg,ArrayRef<unsigned>((unsigned)idx));
 }
 
+DLLEXPORT extern "C" void *create_insert_value(Value *agg, Value *val, size_t idx)
+{
+    return clang_cgf->Builder.CreateInsertValue(agg,val,ArrayRef<unsigned>((unsigned)idx));
+}
+
 DLLEXPORT extern "C" void *lookup_name(char *name, clang::Decl *decl)
 {
+    clang::SourceManager &sm = clang_compiler->getSourceManager();
+    clang::CXXScopeSpec spec;
+    spec.setBeginLoc(sm.getLocForStartOfFile(sm.getMainFileID()));
+    spec.setEndLoc(sm.getLocForStartOfFile(sm.getMainFileID()));
+    clang::DeclarationName DName(&clang_astcontext->Idents.get(name));
+    clang::Sema &cs = clang_compiler->getSema();
+    clang::DeclContext *ctx = dyn_cast<clang::DeclContext>(decl);
+    cs.RequireCompleteDeclContext(spec,ctx);
+    //return ctx->lookup(DName).front();
     clang::Sema &sema = clang_compiler->getSema();
-    clang::LookupResult R(sema, clang::DeclarationName(&clang_astcontext->Idents.get(name)), clang::SourceLocation(), clang::Sema::LookupAnyName);
-    sema.LookupQualifiedName(R, dyn_cast<clang::DeclContext>(decl), false);
+    clang::LookupResult R(sema, DName, clang::SourceLocation(), clang::Sema::LookupAnyName);
+    sema.LookupQualifiedName(R, ctx, false);
     return R.empty() ? NULL : R.getRepresentativeDecl();
 }
 
@@ -332,6 +350,19 @@ DLLEXPORT extern "C" void *get_primary_dc(clang::DeclContext *dc)
 
 DLLEXPORT extern "C" void *decl_context(clang::Decl *decl)
 {
+    if(isa<clang::TypedefNameDecl>(decl))
+    {
+        decl = dyn_cast<clang::TypedefNameDecl>(decl)->getUnderlyingType().getTypePtr()->getAsCXXRecordDecl(); 
+    }
+    /*
+    if(isa<clang::ClassTemplateSpecializationDecl>(decl))
+    {
+        auto ptr = cast<clang::ClassTemplateSpecializationDecl>(decl)->getSpecializedTemplateOrPartial();
+        if (ptr.is<clang::ClassTemplateDecl*>())
+            decl = ptr.get<clang::ClassTemplateDecl*>();
+        else
+            decl = ptr.get<clang::ClassTemplatePartialSpecializationDecl*>();
+    }*/
     return dyn_cast<clang::DeclContext>(decl);
 }
 
@@ -345,10 +376,22 @@ DLLEXPORT extern "C" void *get_result_type(void *cppfunc)
 {
     clang::Decl* MD = ((clang::Decl *)cppfunc);
     clang::FunctionDecl* fdecl = dyn_cast<clang::FunctionDecl>(MD);
-    return (void*)fdecl->getCallResultType().getTypePtr();
+    return (void*)fdecl->getResultType().getTypePtr();
 }
 
-DLLEXPORT extern "C" void emit_cpp_call(void *cppfunc, Value **args, size_t nargs, bool Forward)
+DLLEXPORT extern "C" void *emit_field_ref(clang::Type *BaseType, Value *BaseVal, clang::FieldDecl *FieldDecl)
+{
+    clang::CodeGen::LValue BaseLV = clang_cgf->MakeNaturalAlignAddrLValue(BaseVal,clang::QualType(BaseType,0));
+    clang::CodeGen::LValue LV = clang_cgf->EmitLValueForField(BaseLV,FieldDecl);
+    return LV.getAddress();
+}
+
+DLLEXPORT extern "C" void emit_cpp_assign()
+{
+
+}
+
+DLLEXPORT extern "C" Value *emit_cpp_call(void *cppfunc, Value **args, size_t nargs, bool Forward, bool EmitReturn)
 {
     clang::Decl* MD = ((clang::Decl *)cppfunc);
     clang::FunctionDecl* fdecl = dyn_cast<clang::FunctionDecl>(MD);
@@ -403,14 +446,21 @@ DLLEXPORT extern "C" void emit_cpp_call(void *cppfunc, Value **args, size_t narg
             argvals.add(clang::CodeGen::RValue::get(args[i]),(*it)->getOriginalType());
     }
 
+    clang::Sema &sema = clang_compiler->getSema();
+
     // emit default arguments
     for(; it != fdecl->param_end(); ++it)
     {
         assert((*it)->hasDefaultArg());
-        argvals.add(clang_cgf->EmitAnyExpr((*it)->getDefaultArg()),(*it)->getOriginalType());
+        clang::QualType T = (*it)->getOriginalType();
+        clang::Expr *E = sema.BuildCXXDefaultArgExpr(clang::SourceLocation(),fdecl,*it).get();
+        if (T->isReferenceType())
+        {
+            argvals.add(clang_cgf->EmitReferenceBindingToExpr(E,NULL),T);
+        } else {
+            argvals.add(clang_cgf->EmitAnyExpr(E),T);
+        }
     }
-
-    clang::Sema &sema = clang_compiler->getSema();
 
     llvm::FunctionType *Ty = clang_cgm->getTypes().GetFunctionType(cgfi);
     clang::CodeGen::RValue rv;
@@ -420,8 +470,8 @@ DLLEXPORT extern "C" void emit_cpp_call(void *cppfunc, Value **args, size_t narg
         clang::CXXMethodDecl *cxx = dyn_cast<clang::CXXMethodDecl>(fdecl);
 
         // Well, let's try this, shall we?
-        if (cxx->doesThisDeclarationHaveABody())
-            clang_cgm->EmitTopLevelDecl(cxx);
+        //if (cxx->doesThisDeclarationHaveABody())
+        //    clang_cgm->EmitTopLevelDecl(cxx);
 
         rv = clang_cgf->EmitCall(
             cgfi, clang_cgm->GetAddrOfFunction(cxx,Ty), return_slot,
@@ -435,19 +485,29 @@ DLLEXPORT extern "C" void emit_cpp_call(void *cppfunc, Value **args, size_t narg
    
     }
 
-
-
     assert(rv.isScalar());
     Value *ret = rv.getScalarVal();
-    // Funnily the RetVoid won't actually be inserted into the basic block
-    // of the function if ret == NULL. Instead clan
-    if (ret == NULL || ret->getType() == T_void)
-        clang_cgf->Builder.CreateRetVoid();
-    else
-        clang_cgf->Builder.CreateRet(clang_cgf->Builder.CreateBitCast(ret,clang_cgf->CurFn->getReturnType()));
 
-    clang_cgm->Release();
-    sema.PerformPendingInstantiations(false);
+    if(EmitReturn) {
+        // Funnily the RetVoid won't actually be inserted into the basic block
+        // of the function if ret == NULL. Instead clan
+        if (ret == NULL || ret->getType() == T_void)
+            clang_cgf->Builder.CreateRetVoid();
+        else
+            clang_cgf->Builder.CreateRet(clang_cgf->Builder.CreateBitCast(ret,clang_cgf->CurFn->getReturnType()));
+    }
+
+    return ret;
+}
+
+DLLEXPORT extern "C" const char *decl_name(clang::NamedDecl *decl)
+{
+    return decl->getName().data();
+}
+
+DLLEXPORT extern "C" void *referenced_type(clang::Type *t)
+{
+    return (void*)t->getPointeeType().getTypePtr();
 }
 
 DLLEXPORT extern "C" void *clang_get_instance()
@@ -470,3 +530,12 @@ DLLEXPORT extern "C" void *clang_get_cgt()
     return clang_cgt;
 }
 
+DLLEXPORT extern "C" void *clang_get_builder()
+{
+    return (void*)&clang_cgf->Builder;
+}
+
+DLLEXPORT extern "C" void cdump(void *decl)
+{
+    ((clang::Decl*) decl)->dump();
+}
