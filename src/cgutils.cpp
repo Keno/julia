@@ -155,7 +155,7 @@ static Type *julia_struct_to_llvm(jl_value_t *jt)
         if (jst->struct_decl == NULL) {
             size_t ntypes = jl_tuple_len(jst->types);
             if (ntypes == 0)
-                return NULL;
+                return T_void;
             StructType *structdecl = StructType::create(getGlobalContext(), jst->name->name->name);
             jst->struct_decl = structdecl;
             std::vector<Type *> latypes(0);
