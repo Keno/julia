@@ -15,7 +15,7 @@ FLAGS = \
 	-Iflisp -Isupport -fvisibility=hidden -fno-common \
 	-I$(call exec,$(LLVM_CONFIG) --includedir) \
 	-I$(LIBUV_INC) -I$(JULIAHOME)/usr/include \
-	-I$(JULIAHOME)/deps/llvm-3.3/tools/clang/lib
+	-I$(JULIAHOME)/deps/llvm-$(LLVM_VER)/tools/clang/lib
 
 LLVMLINK = $(call exec,$(LLVM_CONFIG) --libs)
 ifeq ($(USE_LLVM_SHLIB),1)

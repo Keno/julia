@@ -26,7 +26,7 @@
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/DeclTemplate.h>
 #include <clang/Basic/Specifiers.h>
-#include <CodeGen/CodeGenModule.h>
+#include "CodeGen/CodeGenModule.h"
 #include <CodeGen/CodeGenTypes.h>
 #include <CodeGen/CodeGenFunction.h>
 
@@ -252,8 +252,13 @@ DLLEXPORT extern "C" void emit_cpp_new(void *type)
     // TODO: This may be incorrect.
     sema.CurContext = MD->getDeclContext();
 
+#ifdef LLVM34
     sema.FindAllocationFunctions(clang::SourceLocation(),clang::SourceLocation(),globalNew,
-    ty,false,NULL,0,OperatorNew,OperatorDelete);
+    ty,false,clang::MultiExprArg(),OperatorNew,OperatorDelete);
+#else
+    sema.FindAllocationFunctions(clang::SourceLocation(),clang::SourceLocation(),globalNew,
+    ty,false,0,NULL,OperatorNew,OperatorDelete);
+#endif
 
     Value *ret = clang_cgf->EmitCXXNewExpr(dyn_cast<clang::CXXNewExpr>(sema.Owned(new (astctx) clang::CXXNewExpr(MD->getASTContext(),globalNew,OperatorNew,OperatorDelete,false,ArrayRef< clang::Expr * >(),
         clang::SourceRange(),
@@ -456,7 +461,11 @@ DLLEXPORT extern "C" Value *emit_cpp_call(void *cppfunc, Value **args, size_t na
         clang::Expr *E = sema.BuildCXXDefaultArgExpr(clang::SourceLocation(),fdecl,*it).get();
         if (T->isReferenceType())
         {
+#ifdef LLVM34
+            argvals.add(clang_cgf->EmitReferenceBindingToExpr(E),T);
+#else
             argvals.add(clang_cgf->EmitReferenceBindingToExpr(E,NULL),T);
+#endif
         } else {
             argvals.add(clang_cgf->EmitAnyExpr(E),T);
         }
