@@ -186,7 +186,7 @@ SHIPFLAGS = -O3
 ifeq ($(OS), Darwin)
 ifeq ($(USE_LIBCPP), 1)
 CC += -stdlib=libc++ -mmacosx-version-min=10.7
-CXX += -stdlib=libc++ -mmacosx-version-min=10.7
+CXX += -stdlib=libc++  -mmacosx-version-min=10.7
 FC += -mmacosx-version-min=10.7
 else
 CC += $(STDLIBCPP_FLAG) -mmacosx-version-min=10.6

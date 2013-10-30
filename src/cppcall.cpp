@@ -223,7 +223,7 @@ DLLEXPORT extern "C" void *setup_cpp_env(void *module, void *jlfunc)
     return alloca_bb_ptr;
 }
 
-DLLEXPORT extern "C" void cleanup_cpp_env(void *alloca_bb_ptr, void *decl)
+DLLEXPORT extern "C" void cleanup_cpp_env(void *alloca_bb_ptr)
 {
     clang_compiler->getSema().PerformPendingInstantiations(false);
     clang_cgm->Release();
@@ -337,9 +337,8 @@ DLLEXPORT extern "C" void *lookup_name(char *name, clang::Decl *decl)
     clang::DeclContext *ctx = dyn_cast<clang::DeclContext>(decl);
     cs.RequireCompleteDeclContext(spec,ctx);
     //return ctx->lookup(DName).front();
-    clang::Sema &sema = clang_compiler->getSema();
-    clang::LookupResult R(sema, DName, clang::SourceLocation(), clang::Sema::LookupAnyName);
-    sema.LookupQualifiedName(R, ctx, false);
+    clang::LookupResult R(cs, DName, clang::SourceLocation(), clang::Sema::LookupAnyName);
+    cs.LookupQualifiedName(R, ctx, false);
     return R.empty() ? NULL : R.getRepresentativeDecl();
 }
 

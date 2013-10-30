@@ -26,7 +26,7 @@ CLANG_LIBS = -lclangFrontendTool -lclangBasic -lclangLex -lclangDriver -lclangFr
     -lclangAST -lclangASTMatchers -lclangSema -lclangAnalysis -lclangEdit \
     -lclangRewriteFrontend -lclangRewriteCore -lclangSerialization -lclangStaticAnalyzerCheckers \
     -lclangStaticAnalyzerCore -lclangStaticAnalyzerFrontend -lclangTooling \
-    -lclangCodeGen -lclangARCMigrate -lclang 
+    -lclangCodeGen -lclangARCMigrate
 
 LIBS = $(WHOLE_ARCHIVE) $(JULIAHOME)/src/flisp/libflisp.a $(WHOLE_ARCHIVE) $(JULIAHOME)/src/support/libsupport.a -L$(BUILD)/lib $(LIBUV) $(CLANG_LIBS) $(NO_WHOLE_ARCHIVE) $(call exec,$(LLVM_CONFIG) --ldflags) $(LLVMLINK) $(OSLIBS)
 
@@ -99,7 +99,7 @@ endif
 $(BUILD)/$(JL_LIBDIR)/libjulia.$(SHLIB_EXT): julia.expmap $(OBJS) flisp/libflisp.a support/libsupport.a $(LIBUV)
 	@$(call PRINT_LINK, $(CXX) $(SHIPFLAGS) $(OBJS) $(RPATH_ORIGIN) -shared -o $@ $(LDFLAGS) $(LIBS) $(SONAME))
 	$(INSTALL_NAME_CMD)libjulia.$(SHLIB_EXT) $@
-libjulia.a: julia.expmap $(OBJS) flisp/libflisp.a support/libsupport.a
+libjulia.a: julia.expmap $(OBJS) flisp/libflisp.a support/libsupport.Ca
 	rm -f $@
 	@$(call PRINT_LINK, ar -rcs $@ $(OBJS))
 libjulia-release: $(BUILD)/$(JL_LIBDIR)/libjulia.$(SHLIB_EXT)
