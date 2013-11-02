@@ -153,10 +153,7 @@ USE_SYSTEM_LIBUNWIND=1
 else
 ifeq ($(DARWINVER),13)
 USE_LIBCPP = 1
-<<<<<<< HEAD
 STDLIBCPP_FLAG = -stdlib=libstdc++
-=======
->>>>>>> Make Julia work on 10.9
 else 
 USE_LIBCPP = 0
 endif
@@ -193,31 +190,18 @@ DEBUGFLAGS = -O0 -g -DDEBUG -fstack-protector-all
 SHIPFLAGS = -O3
 ifeq ($(OS), Darwin)
 ifeq ($(USE_LIBCPP), 1)
-<<<<<<< HEAD
 CC += -stdlib=libc++ -mmacosx-version-min=10.7
 CXX += -stdlib=libc++ -mmacosx-version-min=10.7
 FC += -mmacosx-version-min=10.7
 else
 CC += $(STDLIBCPP_FLAG) -mmacosx-version-min=10.6
 CXX += $(STDLIBCPP_FLAG) -mmacosx-version-min=10.6
-=======
-CC += -mmacosx-version-min=10.7
-CXX += -mmacosx-version-min=10.7
-FC += -mmacosx-version-min=10.7
-else
-CC += -mmacosx-version-min=10.6
-CXX += -mmacosx-version-min=10.6
->>>>>>> Make Julia work on 10.9
 endif
 JCFLAGS += -D_LARGEFILE_SOURCE -D_DARWIN_USE_64_BIT_INODE=1
 endif
 endif
 
-<<<<<<< HEAD
 JFFLAGS = -O2 $(fPIC)
-=======
-JFFLAGS = -O2 $(fPIC) -mmacosx-version-min=10.8
->>>>>>> Make Julia work on 10.9
 CPP = $(CC) -E
 AR := $(CROSS_COMPILE)ar
 AS := $(CROSS_COMPILE)as
