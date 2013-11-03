@@ -1070,7 +1070,7 @@ static Value *emit_ccall(jl_value_t **args, size_t nargs, jl_codectx_t *ctx)
                     arg = UndefValue::get(totype);
                 }
                 else {
-                    arg = emit_unbox(totype, ptype, arg);
+                    arg = emit_unbox(totype, arg, expr_type(argi, ctx));
                 }
             }
         }
