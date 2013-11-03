@@ -107,7 +107,7 @@ function eval_user_input(ast::ANY, show_value)
             else
                 ast = expand(ast)
                 value = eval(Main,ast)
-                global ans = value
+                eval(Main, :(ans = $(Expr(:quote, value))))
                 if !is(value,nothing) && show_value
                     if have_color
                         print(answer_color())
@@ -353,7 +353,7 @@ function load_juliarc()
     else
         try_include(abspath(JULIA_HOME,"..","etc","julia","juliarc.jl"))
     end
-    try_include(abspath(user_prefdir(),".juliarc.jl"))
+    try_include(abspath(homedir(),".juliarc.jl"))
 end
 
 

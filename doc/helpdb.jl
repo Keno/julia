@@ -911,6 +911,13 @@
 
 "),
 
+("Iterable Collections","Base","collect","collect(element_type, collection)
+
+   Return an array of type \"Array{element_type,1}\" of all items in a
+   collection.
+
+"),
+
 ("Iterable Collections","Base","issubset","issubset(a, b)
 
    Determine whether every element of \"a\" is also in \"b\", using
@@ -4976,13 +4983,13 @@ popdisplay(d::Display)
 
 ("Arrays","Base","trues","trues(dims)
 
-   Create a Bool array with all values set to true
+   Create a \"BitArray\" with all values set to true
 
 "),
 
 ("Arrays","Base","falses","falses(dims)
 
-   Create a Bool array with all values set to false
+   Create a \"BitArray\" with all values set to false
 
 "),
 
@@ -5583,7 +5590,9 @@ popdisplay(d::Display)
 ("Statistics","Base","mean","mean(v[, region])
 
    Compute the mean of whole array \"v\", or optionally along the
-   dimensions in \"region\".
+   dimensions in \"region\". Note: Julia does not ignore \"NaN\"
+   values in the computation. For applications requiring the handling
+   of missing data, the \"DataArray\" package is recommended.
 
 "),
 
@@ -5595,13 +5604,17 @@ popdisplay(d::Display)
    the assumption that each entry of \"v\" is an IID draw from that
    generative distribution. This computation is equivalent to
    calculating \"sqrt(sum((v - mean(v)).^2) / (length(v) - 1))\".
+   Note: Julia does not ignore \"NaN\" values in the computation. For
+   applications requiring the handling of missing data, the
+   \"DataArray\" package is recommended.
 
 "),
 
 ("Statistics","Base","stdm","stdm(v, m)
 
    Compute the sample standard deviation of a vector \"v\" with known
-   mean \"m\".
+   mean \"m\". Note: Julia does not ignore \"NaN\" values in the
+   computation.
 
 "),
 
@@ -5612,14 +5625,18 @@ popdisplay(d::Display)
    estimator of the generative distribution's variance under the
    assumption that each entry of \"v\" is an IID draw from that
    generative distribution. This computation is equivalent to
-   calculating \"sum((v - mean(v)).^2) / (length(v) - 1)\".
+   calculating \"sum((v - mean(v)).^2) / (length(v) - 1)\". Note:
+   Julia does not ignore \"NaN\" values in the computation. For
+   applications requiring the handling of missing data, the
+   \"DataArray\" package is recommended.
 
 "),
 
 ("Statistics","Base","varm","varm(v, m)
 
    Compute the sample variance of a vector \"v\" with known mean
-   \"m\".
+   \"m\". Note: Julia does not ignore \"NaN\" values in the
+   computation.
 
 "),
 
@@ -5627,7 +5644,9 @@ popdisplay(d::Display)
 
    Compute the median of a vector \"v\". If keyword argument
    \"checknan\" is true (the default), an error is raised for data
-   containing NaN values.
+   containing NaN values. Note: Julia does not ignore \"NaN\" values
+   in the computation. For applications requiring the handling of
+   missing data, the \"DataArray\" package is recommended.
 
 "),
 
@@ -5642,7 +5661,8 @@ popdisplay(d::Display)
    Compute the histogram of \"v\", optionally using approximately
    \"n\" bins. The return values are a range \"e\", which correspond
    to the edges of the bins, and \"counts\" containing the number of
-   elements of \"v\" in each bin.
+   elements of \"v\" in each bin. Note: Julia does not ignore \"NaN\"
+   values in the computation.
 
 "),
 
@@ -5651,7 +5671,8 @@ popdisplay(d::Display)
    Compute the histogram of \"v\" using a vector/range \"e\" as the
    edges for the bins. The result will be a vector of length
    \"length(e) - 1\", such that the element at location \"i\"
-   satisfies \"sum(e[i] .< v .<= e[i+1])\".
+   satisfies \"sum(e[i] .< v .<= e[i+1])\". Note: Julia does not
+   ignore \"NaN\" values in the computation.
 
 "),
 
@@ -5663,7 +5684,8 @@ popdisplay(d::Display)
    edges. The result is a tuple of \"edge1\" (the bin edges used in
    the first dimension), \"edge2\" (the bin edges used in the second
    dimension), and \"counts\", a histogram matrix of size
-   \"(length(edge1)-1, length(edge2)-1)\".
+   \"(length(edge1)-1, length(edge2)-1)\". Note: Julia does not ignore
+   \"NaN\" values in the computation.
 
 "),
 
@@ -5671,32 +5693,35 @@ popdisplay(d::Display)
 
    Compute *nice* bin ranges for the edges of a histogram of \"v\",
    using approximately \"n\" bins. The resulting step sizes will be 1,
-   2 or 5 multiplied by a power of 10.
+   2 or 5 multiplied by a power of 10. Note: Julia does not ignore
+   \"NaN\" values in the computation.
 
 "),
 
 ("Statistics","Base","midpoints","midpoints(e)
 
    Compute the midpoints of the bins with edges \"e\". The result is a
-   vector/range of length \"length(e) - 1\".
+   vector/range of length \"length(e) - 1\". Note: Julia does not
+   ignore \"NaN\" values in the computation.
 
 "),
 
 ("Statistics","Base","quantile","quantile(v, p)
 
    Compute the quantiles of a vector \"v\" at a specified set of
-   probability values \"p\".
+   probability values \"p\". Note: Julia does not ignore \"NaN\"
+   values in the computation.
 
 "),
 
-("Statistics","Base","quantile","quantile(v)
+("Statistics","Base","quantile","quantile(v, p)
 
-   Compute the quantiles of a vector \"v\" at the probability values
-   \"[.0, .2, .4, .6, .8, 1.0]\".
+   Compute the quantile of a vector \"v\" at the probability \"p\".
+   Note: Julia does not ignore \"NaN\" values in the computation.
 
 "),
 
-("Statistics","Base","quantile!","quantile!(v[, p])
+("Statistics","Base","quantile!","quantile!(v, p)
 
    Like \"quantile\", but overwrites the input vector.
 
@@ -5706,7 +5731,8 @@ popdisplay(d::Display)
 
    Compute the Pearson covariance between two vectors \"v1\" and
    \"v2\". If called with a single element \"v\", then computes
-   covariance of columns of \"v\".
+   covariance of columns of \"v\". Note: Julia does not ignore \"NaN\"
+   values in the computation.
 
 "),
 
@@ -5714,7 +5740,8 @@ popdisplay(d::Display)
 
    Compute the Pearson correlation between two vectors \"v1\" and
    \"v2\". If called with a single element \"v\", then computes
-   correlation of columns of \"v\".
+   correlation of columns of \"v\". Note: Julia does not ignore
+   \"NaN\" values in the computation.
 
 "),
 
@@ -6948,6 +6975,19 @@ popdisplay(d::Display)
 
 "),
 
+("C Interface","Base","copy!","copy!(dest, src)
+
+   Copy all elements from collection \"src\" to array \"dest\".
+
+"),
+
+("C Interface","Base","copy!","copy!(dest, do, src, so, N)
+
+   Copy \"N\" elements from collection \"src\" starting at offset
+   \"so\", to array \"dest\" starting at offset \"do\".
+
+"),
+
 ("C Interface","Base","pointer","pointer(a[, index])
 
    Get the native address of an array element. Be careful to ensure
@@ -7334,6 +7374,15 @@ popdisplay(d::Display)
 
    Assign a value to a symbol in the current task's task-local
    storage.
+
+"),
+
+("Tasks","Base","task_local_storage","task_local_storage(body, symbol, value)
+
+   Call the function \"body\" with a modified task-local storage, in
+   which \"value\" is assigned to \"symbol\"; the previous value of
+   \"symbol\", or lack thereof, is restored afterwards. Useful for
+   emulating dynamic scoping.
 
 "),
 
@@ -8151,7 +8200,7 @@ popdisplay(d::Display)
    Compute the pivoted Cholesky factorization of a symmetric positive
    semi-definite matrix \"A\" and return a \"CholeskyPivoted\" object.
    \"LU\" may be 'L' for using the lower part or 'U' for the upper
-   part. The default is to use 'U'. The triangular factors containted
+   part. The default is to use 'U'. The triangular factors contained
    in the factorization \"F\" can be obtained with \"F[:L]\" and
    \"F[:U]\", whereas the permutation can be obtained with \"F[:P]\"
    or \"F[:p]\". The following functions are available for
@@ -8179,14 +8228,16 @@ popdisplay(d::Display)
 
 ("Linear Algebra","Base","qrfact","qrfact(A)
 
-   Compute the QR factorization of \"A\" and return a \"QR\" object.
-   The components of the factorization \"F\" can be accessed as
-   follows: the orthogonal matrix \"Q\" can be extracted with
-   \"F[:Q]\" and the triangular matrix \"R\" with \"F[:R]\". The
-   following functions are available for \"QR\" objects: \"size\",
-   \"\\\". When \"Q\" is extracted, the resulting type is the
-   \"QRPackedQ\" object, and has the \"*\" operator overloaded to
-   support efficient multiplication by \"Q\" and \"Q'\".
+   Computes the QR factorization of \"A\" and returns a \"QR\" type,
+   which is a \"Factorization\" \"F\" consisting of an orthogonal
+   matrix \"F[:Q]\" and a triangular matrix \"F[:R]\". The following
+   functions are available for \"QR\" objects: \"size\", \"\\\". The
+   orthogonal matrix \"Q=F[:Q]\" is a \"QRPackedQ\" type which has the
+   \"*\" operator overloaded to support efficient multiplication by
+   \"Q\" and \"Q'\". Multiplication with respect to either thin or
+   full \"Q\" is allowed, i.e. both \"F[:Q]*F[:R]\" and \"F[:Q]*A\"
+   are supported. A \"QRPackedQ\" matrix can be converted into a
+   regular matrix with \"full\".
 
 "),
 
@@ -8199,7 +8250,7 @@ popdisplay(d::Display)
 
 ("Linear Algebra","Base","qrp","qrp(A[, thin]) -> Q, R, p
 
-   Compute the QR factorization of \"A\" with pivoting, such that
+   Computes the QR factorization of \"A\" with pivoting, such that
    \"A[:,p] = Q*R\", Also see \"qrpfact\". The default is to compute a
    thin factorization.
 
@@ -8207,15 +8258,16 @@ popdisplay(d::Display)
 
 ("Linear Algebra","Base","qrpfact","qrpfact(A) -> QRPivoted
 
-   Compute the QR factorization of \"A\" with pivoting and return a
-   \"QRPivoted\" object. The components of the factorization \"F\" can
-   be accessed as follows: the orthogonal matrix \"Q\" can be
-   extracted with \"F[:Q]\", the triangular matrix \"R\" with
-   \"F[:R]\", and the permutation with \"F[:P]\" or \"F[:p]\". The
-   following functions are available for \"QRPivoted\" objects:
-   \"size\", \"\\\". When \"Q\" is extracted, the resulting type is
-   the \"QRPivotedQ\" object, and has the \"*\" operator overloaded to
-   support efficient multiplication by \"Q\" and \"Q'\". A
+   Computes the QR factorization of \"A\" with pivoting and returns a
+   \"QRPivoted\" object, which is a \"Factorization\" \"F\" consisting
+   of an orthogonal matrix \"F[:Q]\", a triangular matrix \"F[:R]\",
+   and a permutation \"F[:p]\" (or  its matrix representation
+   \"F[:P]\"). The following functions are available for \"QRPivoted\"
+   objects: \"size\", \"\\\". The orthogonal matrix \"Q=F[:Q]\" is a
+   \"QRPivotedQ\" type which has the \"*\" operator overloaded to
+   support efficient multiplication by \"Q\" and \"Q'\".
+   Multiplication with respect to either the thin or full \"Q\" is
+   allowed, i.e. both \"F[:Q]*F[:R]\" and \"F[:Q]*A\" are supperted. A
    \"QRPivotedQ\" matrix can be converted into a regular matrix with
    \"full\".
 
@@ -8781,19 +8833,19 @@ popdisplay(d::Display)
 
 "),
 
-("BLAS Functions","Base","copy!","copy!(n, X, incx, Y, incy)
-
-   Copy \"n\" elements of array \"X\" with stride \"incx\" to array
-   \"Y\" with stride \"incy\".  Returns \"Y\".
-
-"),
-
 ("BLAS Functions","Base","dot","dot(n, X, incx, Y, incy)
 
    Dot product of two vectors consisting of \"n\" elements of array
    \"X\" with stride \"incx\" and \"n\" elements of array \"Y\" with
    stride \"incy\".  There are no \"dot\" methods for \"Complex\"
    arrays.
+
+"),
+
+("BLAS Functions","Base.LinAlg.BLAS","blascopy!","blascopy!(n, X, incx, Y, incy)
+
+   Copy \"n\" elements of array \"X\" with stride \"incx\" to array
+   \"Y\" with stride \"incy\".  Returns \"Y\".
 
 "),
 
@@ -9088,6 +9140,210 @@ popdisplay(d::Display)
 ("BLAS Functions","Base.LinAlg.BLAS","blas_set_num_threads","blas_set_num_threads(n)
 
    Set the number of threads the BLAS library should use.
+
+"),
+
+("Package Manager Functions","Base.Pkg","dir","dir() -> String
+
+   Returns the absolute path of the package directory. This defaults
+   to \"joinpath(home(),\".julia\")\" on all platforms (i.e.
+   \"~/.julia\" in UNIX shell syntax). If the \"JULIA_PKGDIR\"
+   environment variable is set, that path is used instead. If
+   \"JULIA_PKGDIR\" is a relative path, it is interpreted relative to
+   whatever the current working directory is.
+
+"),
+
+("Package Manager Functions","Base.Pkg","dir","dir(names...) -> String
+
+   Equivalent to \"normpath(Pkg.dir(),names...)\" – i.e. it appends
+   path components to the package directory and normalizes the
+   resulting path. In particular, \"Pkg.dir(pkg)\" returns the path to
+   the package \"pkg\".
+
+"),
+
+("Package Manager Functions","Base.Pkg","init","init()
+
+   Initialize \"Pkg.dir()\" as a package directory. This will be done
+   automatically when the \"JULIA_PKGDIR\" is not set and
+   \"Pkg.dir()\" uses its default value.
+
+"),
+
+("Package Manager Functions","Base.Pkg","resolve","resolve()
+
+   Determines an optimal, consistent set of package versions to
+   install or upgrade to. The optimal set of package versions is based
+   on the contents of \"Pkg.dir(\"REQUIRE\")\" and the state of
+   installed packages in \"Pkg.dir()\", Packages that are no longer
+   required are moved into \"Pkg.dir(\".trash\")\".
+
+"),
+
+("Package Manager Functions","Base.Pkg","edit","edit()
+
+   Opens \"Pkg.dir(\"REQUIRE\")\" in the editor specified by the
+   \"VISUAL\" or \"EDITOR\" environment variables; when the editor
+   command returns, it runs \"Pkg.resolve()\" to determine and install
+   a new optimal set of installed package versions.
+
+"),
+
+("Package Manager Functions","Base.Pkg","add","add(pkg, vers...)
+
+   Add a requirement entry for \"pkg\" to \"Pkg.dir(\"REQUIRE\")\" and
+   call \"Pkg.resolve()\". If \"vers\" are given, they must be
+   \"VersionNumber\" objects and they specify acceptable version
+   intervals for \"pkg\".
+
+"),
+
+("Package Manager Functions","Base.Pkg","rm","rm(pkg)
+
+   Remove all requirement entries for \"pkg\" from
+   \"Pkg.dir(\"REQUIRE\")\" and call \"Pkg.resolve()\".
+
+"),
+
+("Package Manager Functions","Base.Pkg","clone","clone(url[, pkg])
+
+   Clone a package directly from the git URL \"url\". The package does
+   not need to be a registered in \"Pkg.dir(\"METADATA\")\". The
+   package repo is cloned by the name \"pkg\" if provided; if not
+   provided, \"pkg\" is determined automatically from \"url\".
+
+"),
+
+("Package Manager Functions","Base.Pkg","clone","clone(pkg)
+
+   If \"pkg\" has a URL registered in \"Pkg.dir(\"METADATA\")\", clone
+   it from that URL on the default branch. The package does not need
+   to have any registered versions.
+
+"),
+
+("Package Manager Functions","Base.Pkg","available","available() -> Vector{ASCIIString}
+
+   Returns the names of available packages.
+
+"),
+
+("Package Manager Functions","Base.Pkg","available","available(pkg) -> Vector{VersionNumber}
+
+   Returns the version numbers available for package \"pkg\".
+
+"),
+
+("Package Manager Functions","Base.Pkg","installed","installed() -> Dict{ASCIIString,VersionNumber}
+
+   Returns a dictionary mapping installed package names to the
+   installed version number of each package.
+
+"),
+
+("Package Manager Functions","Base.Pkg","installed","installed(pkg) -> Nothing | VersionNumber
+
+   If \"pkg\" is installed, return the installed version number,
+   otherwise return \"nothing\".
+
+"),
+
+("Package Manager Functions","Base.Pkg","status","status()
+
+   Prints out a summary of what packages are installed and what
+   version and state they're in.
+
+"),
+
+("Package Manager Functions","Base.Pkg","update","update()
+
+   Update package the metadata repo – kept in
+   \"Pkg.dir(\"METADATA\")\" – then update any fixed packages that can
+   safely be pulled from their origin; then call \"Pkg.resolve()\" to
+   determine a new optimal set of packages versions.
+
+"),
+
+("Package Manager Functions","Base.Pkg","checkout","checkout(pkg[, branch=\"master\"])
+
+   Checkout the \"Pkg.dir(pkg)\" repo to the branch \"branch\".
+   Defaults to checking out the \"master\" branch.
+
+"),
+
+("Package Manager Functions","Base.Pkg","pin","pin(pkg)
+
+   Pin \"pkg\" at the current version.
+
+"),
+
+("Package Manager Functions","Base.Pkg","pin","pin(pkg, version)
+
+   Pin \"pkg\" at registered version \"version\".
+
+"),
+
+("Package Manager Functions","Base.Pkg","free","free(pkg)
+
+   Free the package \"pkg\" to be managed by the package manager
+   again. It calls \"Pkg.resolve()\" to determine optimal package
+   versions after. This is an inverse for both \"Pkg.checkout\" and
+   \"Pkg.pin\".
+
+"),
+
+("Package Manager Functions","Base.Pkg","build","build()
+
+   Run the build scripts for all installed packages in depth-first
+   recursive order.
+
+"),
+
+("Package Manager Functions","Base.Pkg","build","build(pkgs...)
+
+   Run the build scripts for each package in \"pkgs\" and all of their
+   dependencies in depth-first recursive order. This is called
+   automatically by \"Pkg.resolve()\" on all installed or updated
+   packages.
+
+"),
+
+("Package Manager Functions","Base.Pkg","generate","generate(pkg, license)
+
+   Generate a new package named \"pkg\" with one of these license
+   keys: \"\"MIT\"\" or \"\"BSD\"\". If you want to make a package
+   with a different license, you can edit it afterwards. Generate
+   creates a git repo at \"Pkg.dir(pkg)\" for the package and inside
+   it \"LICENSE.md\", \"README.md\", the julia entrypoint
+   \"\$pkg/src/\$pkg.jl\", and a travis test file, \".travis.yml\".
+
+"),
+
+("Package Manager Functions","Base.Pkg","register","register(pkg[, url])
+
+   Register \"pkg\" at the git URL \"url\", defaulting to the
+   configured origin URL of the git repo \"Pkg.dir(pkg)\".
+
+"),
+
+("Package Manager Functions","Base.Pkg","tag","tag(pkg[, ver[, commit]])
+
+   Tag \"commit\" as version \"ver\" of package \"pkg\" and create a
+   version entry in \"METADATA\". If not provided, \"commit\" defaults
+   to the current commit of the \"pkg\" repo. If \"ver\" is one of the
+   symbols \":patch\", \":minor\", \":major\" the next patch, minor or
+   major version is used. If \"ver\" is not provided, it defaults to
+   \":patch\".
+
+"),
+
+("Package Manager Functions","Base.Pkg","publish","publish()
+
+   For each new package version tagged in \"METADATA\" not already
+   published, make sure that the tagged package commits have been
+   pushed to the repo at the registered URL for the package and if
+   they all have, push \"METADATA\".
 
 "),
 
@@ -9438,13 +9694,7 @@ popdisplay(d::Display)
 
 "),
 
-("Unit and Functional Testing","Base.Test","registerhandler","registerhandler(handler)
-
-   Change the handler function used globally to \"handler\".
-
-"),
-
-("Unit and Functional Testing","Base.Test","withhandler","withhandler(f, handler)
+("Unit and Functional Testing","Base.Test","with_handler","with_handler(f, handler)
 
    Run the function \"f\" using the \"handler\" as the handler.
 

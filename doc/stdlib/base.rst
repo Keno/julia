@@ -586,6 +586,10 @@ Iterable Collections
 
    Return an array of all items in a collection. For associative collections, returns (key, value) tuples.
 
+.. function:: collect(element_type, collection)
+
+   Return an array of type ``Array{element_type,1}`` of all items in a collection.
+
 .. function:: issubset(a, b)
 
    Determine whether every element of ``a`` is also in ``b``, using the
@@ -607,7 +611,7 @@ Indexable Collections
    The syntax ``a[i,j,...] = x`` is converted by the compiler to
    ``setindex!(a, x, i, j, ...)``.
 
-Fully implemented by: ``Array``, ``DArray``, ``AbstractArray``, ``SubArray``, ``ObjectIdDict``, ``Dict``, ``WeakKeyDict``, ``String``.
+Fully implemented by: ``Array``, ``DArray``, ``BitArray``, ``AbstractArray``, ``SubArray``, ``ObjectIdDict``, ``Dict``, ``WeakKeyDict``, ``String``.
 
 Partially implemented by: ``Range``, ``Range1``, ``Tuple``.
 
@@ -683,7 +687,7 @@ As with arrays, ``Dicts`` may be created with comprehensions. For example,
 
 Fully implemented by: ``ObjectIdDict``, ``Dict``, ``WeakKeyDict``.
 
-Partially implemented by: ``IntSet``, ``Set``, ``EnvHash``, ``Array``.
+Partially implemented by: ``IntSet``, ``Set``, ``EnvHash``, ``Array``, ``BitArray``.
 
 Set-Like Collections
 --------------------
@@ -804,7 +808,7 @@ Dequeues
 
    Insert the elements of ``items`` to the beginning of a collection. ``prepend!([3],[1,2]) => [1,2,3]``
 
-Fully implemented by: ``Vector`` (aka 1-d ``Array``).
+Fully implemented by: ``Vector`` (aka 1-d ``Array``), ``BitVector`` (aka 1-d ``BitArray``).
 
 
 Strings
@@ -3337,11 +3341,11 @@ Constructors
 
 .. function:: trues(dims)
 
-   Create a Bool array with all values set to true
+   Create a ``BitArray`` with all values set to true
 
 .. function:: falses(dims)
 
-   Create a Bool array with all values set to false
+   Create a ``BitArray`` with all values set to false
 
 .. function:: fill(v, dims)
 
@@ -3836,12 +3840,12 @@ Statistics
    Compute the quantiles of a vector ``v`` at a specified set of probability values ``p``.
    Note: Julia does not ignore ``NaN`` values in the computation.
 
-.. function:: quantile(v)
+.. function:: quantile(v, p)
 
-   Compute the quantiles of a vector ``v`` at the probability values ``[.0, .2, .4, .6, .8, 1.0]``.
+   Compute the quantile of a vector ``v`` at the probability ``p``.
    Note: Julia does not ignore ``NaN`` values in the computation.
 
-.. function:: quantile!(v, [p])
+.. function:: quantile!(v, p)
 
    Like ``quantile``, but overwrites the input vector.
 
@@ -4719,6 +4723,15 @@ C Interface
    Copy ``N`` elements from a source array to a destination, starting at offset ``so``
    in the source and ``do`` in the destination.
 
+.. function:: copy!(dest, src)
+
+   Copy all elements from collection ``src`` to array ``dest``.
+
+.. function:: copy!(dest, do, src, so, N)
+
+   Copy ``N`` elements from collection ``src`` starting at offset ``so``, to
+   array ``dest`` starting at offset ``do``.
+
 .. function:: pointer(a[, index])
 
    Get the native address of an array element. Be careful to ensure that a julia
@@ -4973,6 +4986,12 @@ Tasks
 .. function:: task_local_storage(symbol, value)
 
    Assign a value to a symbol in the current task's task-local storage.
+
+.. function:: task_local_storage(body, symbol, value)
+
+   Call the function ``body`` with a modified task-local storage, in which
+   ``value`` is assigned to ``symbol``; the previous value of ``symbol``, or
+   lack thereof, is restored afterwards. Useful for emulating dynamic scoping.
 
 .. function:: Condition()
 

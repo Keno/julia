@@ -196,6 +196,10 @@ end
 
 @deprecate memio(args...)  IOBuffer()
 
+@deprecate user_homedir homedir
+@deprecate user_prefdir homedir
+@deprecate user_documentsdir homedir
+
 # note removed macros: str, B_str, I_str, E_str, L_str, L_mstr, I_mstr, E_mstr
 
 const ref = getindex

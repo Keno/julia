@@ -54,7 +54,7 @@ function rm(pkg::String)
     Write.remove(pkg)
 end
 
-available() = sort!([keys(Read.available())...], by=lowercase)
+available() = sort!(ASCIIString[keys(Read.available())...], by=lowercase)
 
 function available(pkg::String)
     avail = Read.available(pkg)
@@ -65,7 +65,7 @@ function available(pkg::String)
 end
 
 function installed()
-    pkgs = Dict{String,VersionNumber}()
+    pkgs = Dict{ASCIIString,VersionNumber}()
     for (pkg,(ver,fix)) in Read.installed()
         pkgs[pkg] = ver
     end
@@ -462,7 +462,7 @@ end
 
 nextbump(v::VersionNumber) = isrewritable(v) ? v : nextpatch(v)
 
-function tag(pkg::String, ver::Union(Symbol,VersionNumber), force::Bool, commit::String="HEAD")
+function tag(pkg::String, ver::Union(Symbol,VersionNumber), force::Bool=false, commit::String="HEAD")
     ispath(pkg,".git") || error("$pkg is not a git repo")
     Git.dirty(dir=pkg) &&
         error("$pkg is dirty – commit or stash changes to tag")
