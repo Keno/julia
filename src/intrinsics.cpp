@@ -217,7 +217,13 @@ static Value *emit_unbox(Type *to, Value *x, jl_value_t *jt)
         (to->isStructTy() && dyn_cast<StructType>(to)->isLiteral()) )
     {
         assert(jt != 0);
-        assert(jl_is_tuple(jt));
+        assert(!jl_is_uniontype(jt));
+        if(!jl_is_tuple(jt)) {
+            jl_(jt);
+            to->dump();
+            x->dump();
+            abort();
+        }
         assert(to != T_void);
         Value *tpl = UndefValue::get(to);
         for (size_t i = 0; i < jl_tuple_len(jt); ++i) {

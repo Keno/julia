@@ -508,9 +508,12 @@ DLLEXPORT extern "C" Value *emit_cpp_call(void *cppfunc, Value **args, size_t na
     return ret;
 }
 
-DLLEXPORT extern "C" const char *decl_name(clang::NamedDecl *decl)
+DLLEXPORT extern "C" char *decl_name(clang::NamedDecl *decl)
 {
-    return decl->getName().data();
+    std::string str = decl->getQualifiedNameAsString().data();
+    char * cstr = (char*)malloc(str.length()+1);
+    std::strcpy (cstr, str.c_str());
+    return cstr;
 }
 
 DLLEXPORT extern "C" void *referenced_type(clang::Type *t)
