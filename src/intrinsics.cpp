@@ -217,10 +217,10 @@ static Value *emit_unbox(Type *to, Value *x, jl_value_t *jt)
         (to->isStructTy() && dyn_cast<StructType>(to)->isLiteral()) )
     {
         assert(jt != 0);
-        assert(!jl_is_uniontype(jt));
         if(!jl_is_tuple(jt)) {
             jl_(jt);
             to->dump();
+            dyn_cast<Instruction>(x)->getParent()->getParent()->dump();
             x->dump();
             abort();
         }
@@ -473,7 +473,7 @@ static Value *emit_checked_fptosi(Type *to, Value *x, jl_codectx_t *ctx)
         raise_exception_unless
             (builder.CreateFCmpOEQ(builder.CreateFPExt(x, T_float64),
                                    builder.CreateSIToFP(v, T_float64)),
-             jlinexacterr_var, ctx);
+             prepare_global(jlinexacterr_var), ctx);
     }
     else {
         Value *xx = x, *vv = v;
@@ -481,7 +481,7 @@ static Value *emit_checked_fptosi(Type *to, Value *x, jl_codectx_t *ctx)
             xx = builder.CreateFPExt(x, T_float64);
         if (to->getPrimitiveSizeInBits() < 64)
             vv = builder.CreateSExt(v, T_int64);
-        raise_exception_unless(emit_eqfsi64(xx, vv), jlinexacterr_var, ctx);
+        raise_exception_unless(emit_eqfsi64(xx, vv), prepare_global(jlinexacterr_var), ctx);
     }
     return v;
 }
@@ -499,7 +499,7 @@ static Value *emit_checked_fptoui(Type *to, Value *x, jl_codectx_t *ctx)
         raise_exception_unless
             (builder.CreateFCmpOEQ(builder.CreateFPExt(x, T_float64),
                                    builder.CreateUIToFP(v, T_float64)),
-             jlinexacterr_var, ctx);
+             prepare_global(jlinexacterr_var), ctx);
     }
     else {
         Value *xx = x, *vv = v;
@@ -507,7 +507,7 @@ static Value *emit_checked_fptoui(Type *to, Value *x, jl_codectx_t *ctx)
             xx = builder.CreateFPExt(x, T_float64);
         if (to->getPrimitiveSizeInBits() < 64)
             vv = builder.CreateZExt(v, T_int64);
-        raise_exception_unless(emit_eqfui64(xx, vv), jlinexacterr_var, ctx);
+        raise_exception_unless(emit_eqfui64(xx, vv), prepare_global(jlinexacterr_var), ctx);
     }
     return v;
 }
@@ -584,7 +584,7 @@ static Value *emit_iround(Value *x, bool issigned, jl_codectx_t *ctx)
 
     raise_exception_unless(builder.CreateAnd(builder.CreateFCmpOLE(src, max),
                                              builder.CreateFCmpOGE(src, min)),
-                           jlinexacterr_var, ctx);
+                           prepare_global(jlinexacterr_var), ctx);
     if (issigned)
         return builder.CreateFPToSI(src, intt);
     else
@@ -616,7 +616,7 @@ static Value *emit_pointerref(jl_value_t *e, jl_value_t *i, jl_codectx_t *ctx)
         }
         uint64_t size = ((jl_datatype_t*)ety)->size;
         Value *strct =
-            builder.CreateCall(jlallocobj_func,
+            builder.CreateCall(prepare_call(jlallocobj_func),
                                ConstantInt::get(T_size,
                                     sizeof(void*)+size));
         builder.CreateStore(literal_pointer_val((jl_value_t*)ety),
@@ -711,8 +711,8 @@ static Value *emit_intrinsic(intrinsic f, jl_value_t **args, size_t nargs,
         // but if we start looking at more bits we need to actually do the
         // rounding first instead of carrying around incorrect low bits.
         Value *x = auto_unbox(args[2],ctx);
-        builder.CreateStore(FP(x), builder.CreateBitCast(jlfloattemp_var,FT(x->getType())->getPointerTo()), true);
-        return builder.CreateFPExt(builder.CreateLoad(builder.CreateBitCast(jlfloattemp_var,FT(x->getType())->getPointerTo()), true),
+        builder.CreateStore(FP(x), builder.CreateBitCast(prepare_global(jlfloattemp_var),FT(x->getType())->getPointerTo()), true);
+        return builder.CreateFPExt(builder.CreateLoad(builder.CreateBitCast(prepare_global(jlfloattemp_var),FT(x->getType())->getPointerTo()), true),
                                    FTnbits(try_to_determine_bitstype_nbits(args[1],ctx)));
     }
     HANDLE(select_value,3) {
@@ -764,6 +764,7 @@ static Value *emit_intrinsic(intrinsic f, jl_value_t **args, size_t nargs,
 
         typemin = builder.CreateShl(ConstantInt::get(t,1),
                                     x->getType()->getPrimitiveSizeInBits()-1);
+
         raise_exception_unless(builder.
                                CreateAnd(builder.
                                          CreateICmpNE(den, ConstantInt::get(t,0)),
@@ -772,14 +773,14 @@ static Value *emit_intrinsic(intrinsic f, jl_value_t **args, size_t nargs,
                                                   CreateICmpNE(den,
                                                                ConstantInt::get(t,-1,true)),
                                                   builder.CreateICmpNE(x, typemin))),
-                               jldiverr_var, ctx);
+                               prepare_global(jldiverr_var), ctx);
 
         return builder.CreateSDiv(x, den);
     HANDLE(udiv_int,2)
         den = JL_INT(y);
         raise_exception_unless(builder.CreateICmpNE(den,
                                                     ConstantInt::get(t,0)),
-                               jldiverr_var, ctx);
+                               prepare_global(jldiverr_var), ctx);
         return builder.CreateUDiv(JL_INT(x), den);
 
     HANDLE(srem_int,2) return builder.CreateSRem(JL_INT(x), JL_INT(y));
@@ -825,7 +826,7 @@ static Value *emit_intrinsic(intrinsic f, jl_value_t **args, size_t nargs,
                                        ArrayRef<Type*>(atypes)),
              ix, iy);
         Value *obit = builder.CreateExtractValue(res, ArrayRef<unsigned>(1));
-        raise_exception_if(obit, jlovferr_var, ctx);
+        raise_exception_if(obit, prepare_global(jlovferr_var), ctx);
         return builder.CreateExtractValue(res, ArrayRef<unsigned>(0));
     }
 
@@ -1082,7 +1083,7 @@ static Value *emit_intrinsic(intrinsic f, jl_value_t **args, size_t nargs,
         Value *f = FP(x); x = FP(y);
         raise_exception_unless(builder.CreateOr(builder.CreateFCmpORD(f,f),
                                                 builder.CreateFCmpUNO(x,x)),
-                               jldomerr_var, ctx);
+                               prepare_global(jldomerr_var), ctx);
         return f;
     }
 
@@ -1150,8 +1151,8 @@ static Function *boxfunc_llvm(FunctionType *ft, const std::string &cname,
                               void *addr)
 {
     Function *f =
-        Function::Create(ft, Function::ExternalLinkage, cname, jl_Module);
-    jl_ExecutionEngine->addGlobalMapping(f, addr);
+        Function::Create(ft, Function::ExternalLinkage, cname, next_module);
+    sys::DynamicLibrary::AddSymbol(f->getName(), addr);
     return f;
 }
 

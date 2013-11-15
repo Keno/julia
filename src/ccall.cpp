@@ -291,7 +291,7 @@ static Value *julia_to_native(Type *ty, jl_value_t *jt, Value *jv,
             return builder.CreateBitCast(emit_nthptr_addr(jv, (size_t)1), ty); // skip type tag field
         }
         *mightNeedTempSpace = true;
-        Value *p = builder.CreateCall4(value_to_pointer_func,
+        Value *p = builder.CreateCall4(prepare_call(value_to_pointer_func),
                                        literal_pointer_val(jl_tparam0(jt)), jv,
                                        ConstantInt::get(T_int32, argn),
                                        ConstantInt::get(T_int32, (int)addressOf));
@@ -731,10 +731,10 @@ static Value *emit_llvmcall(jl_value_t **args, size_t nargs, jl_codectx_t *ctx)
         JL_GC_POP();
 
         f->dump();
-        if (verifyFunction(*f,PrintMessageAction)) {
-            f->dump();
-            jl_error("Malformed LLVM Function");
-        }
+        //if (verifyFunction(*f,PrintMessageAction)) {
+        //    f->dump();
+        //    jl_error("Malformed LLVM Function");
+        //}
     }
  
     /*
@@ -748,7 +748,7 @@ static Value *emit_llvmcall(jl_value_t **args, size_t nargs, jl_codectx_t *ctx)
     f->setLinkage(GlobalValue::LinkOnceODRLinkage);
     
     // the actual call
-    CallInst *inst = builder.CreateCall(f,ArrayRef<Value*>(&argvals[0],nargt));
+    CallInst *inst = builder.CreateCall(prepare_call(f),ArrayRef<Value*>(&argvals[0],nargt));
     ctx->to_inline.push_back(inst);
 
     JL_GC_POP();
@@ -1005,7 +1005,7 @@ static Value *emit_ccall(jl_value_t **args, size_t nargs, jl_codectx_t *ctx)
                 msg << f_lib;
             }
             msg << "\n";
-        builder.CreateCall2(jlputs_func,
+        builder.CreateCall2(prepare_call(jlputs_func),
                             builder.CreateGEP(stringConst(msg.str()),
                                          ArrayRef<Value*>(zeros)),
                             literal_pointer_val(JL_STDERR));
@@ -1017,7 +1017,7 @@ static Value *emit_ccall(jl_value_t **args, size_t nargs, jl_codectx_t *ctx)
     if (sret) {
         assert(jl_is_structtype(rt));
         result = builder.CreateCall(
-                jlallocobj_func,
+                prepare_call(jlallocobj_func),
                 ConstantInt::get(T_size,
                     sizeof(void*)+((jl_datatype_t*)rt)->size));
         //TODO: Fill type pointer fields with C_NULL's
@@ -1090,7 +1090,7 @@ static Value *emit_ccall(jl_value_t **args, size_t nargs, jl_codectx_t *ctx)
     if (needTempSpace) {
         // save temp argument area stack pointer
         // TODO: inline this
-        saveloc = CallInst::Create(save_arg_area_loc_func);
+        saveloc = CallInst::Create(prepare_call(save_arg_area_loc_func));
         stacksave = CallInst::Create(Intrinsic::getDeclaration(jl_Module,
                                                                Intrinsic::stacksave));
         if (savespot)
@@ -1101,7 +1101,7 @@ static Value *emit_ccall(jl_value_t **args, size_t nargs, jl_codectx_t *ctx)
     }
     // the actual call
     Value *ret = builder.CreateCall(
-            llvmf,
+            prepare_call(llvmf),
             ArrayRef<Value*>(&argvals[0],(nargs-3)/2+sret));
 
     attr_type attributes;
@@ -1127,7 +1127,7 @@ static Value *emit_ccall(jl_value_t **args, size_t nargs, jl_codectx_t *ctx)
     if (needTempSpace) {
         // restore temp argument area stack pointer
         assert(saveloc != NULL);
-        builder.CreateCall(restore_arg_area_loc_func, saveloc);
+        builder.CreateCall(prepare_call(restore_arg_area_loc_func), saveloc);
         assert(stacksave != NULL);
         builder.CreateCall(Intrinsic::getDeclaration(jl_Module,
                                                      Intrinsic::stackrestore),
@@ -1149,7 +1149,7 @@ static Value *emit_ccall(jl_value_t **args, size_t nargs, jl_codectx_t *ctx)
         //fprintf(stderr, "ccall rt: %s -> %s\n", f_name, ((jl_tag_type_t*)rt)->name->name->name);
         assert(jl_is_structtype(rt));
         Value *strct =
-            builder.CreateCall(jlallocobj_func,
+            builder.CreateCall(prepare_call(jlallocobj_func),
                                ConstantInt::get(T_size,
                                     sizeof(void*)+((jl_datatype_t*)rt)->size));
         builder.CreateStore(literal_pointer_val((jl_value_t*)rt),

@@ -412,7 +412,7 @@ sqrtm(A::StridedMatrix) = sqrtm(A, false)
 sqrtm(a::Number) = (b = sqrt(complex(a)); imag(b) == 0 ? real(b) : b)
 sqrtm(a::Complex) = sqrt(a)
 
-function det{T<:Number}(A::AbstractMatrix{T})
+function det{T<:Union(Float32,Float64,Complex64,Complex128)}(A::AbstractMatrix{T})
     if istriu(A) | istril(A); return det(Triangular(A, :U, false)); end
     return det(lufact(A))
 end

@@ -115,18 +115,16 @@ t_func[eval(Core.Intrinsics,:ccall)] =
     (3, Inf, (fptr, rt, at, a...)->(is(rt,Type{Void}) ? Nothing :
                                     isType(rt) ? rt.parameters[1] : Any))
 t_func[eval(Core.Intrinsics,:llvmcall)] =
-(3, Inf,function(args, a...)
+(3, Inf,function(args, fptrt, rtt, att, a...)
     fptr, rt, at = args
-    if rt === Type{Void}
-        return Nothing
-    elseif isa(rt,Type) 
-        if isa(rt,Tuple)
-            return map(x->x.parameters[1],rt)
-        else
-            return rt.parameters[1]
-        end
+    if is(rt,Type{Void}) 
+        Nothing
+    elseif isType(rtt)
+        rtt.parameters[1]
+    elseif isa(rtt,Type) && isa(rtt,Tuple)
+        return map(x->x.parameters[1],rtt)
     elseif isa(rt,Tuple) && isa(rt[1],Function)
-        return rt[1](rt[2:end]...,a[4:end]...)
+        return rt[1](rt[2:end]...,a...)
     else 
         return Any
     end
