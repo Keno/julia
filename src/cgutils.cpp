@@ -85,7 +85,9 @@ static Type *julia_type_to_llvm(jl_value_t *jt)
                 break;
         }
         if (purebits) {
-            if (isvector) {
+            // Can't be bool due to 
+            // http://llvm.org/bugs/show_bug.cgi?id=12618
+            if (isvector && type != T_int1) {
                 Type *ret = NULL;
                 if(type == T_void)
                     return T_void;

@@ -342,6 +342,7 @@ extern "C" void jl_generate_fptr(jl_function_t *f)
             llvmf->getParent()->dump();
             jl_Module->dump();
             next_module->dump();
+            li->fptr = (jl_fptr_t)jl_ExecutionEngine->getFunctionAddress(llvmf->getName());
             abort();
         }
         if (li->cFunctionObject != NULL)
@@ -3373,6 +3374,7 @@ extern "C" jl_value_t *jl_new_box(jl_value_t *v)
     return box;
 }
 
+
 static void init_julia_llvm_env(Module *m)
 {
     T_int1  = Type::getInt1Ty(getGlobalContext());
@@ -3422,7 +3424,7 @@ static void init_julia_llvm_env(Module *m)
 
 #ifdef JL_GC_MARKSWEEP
     jlpgcstack_var =
-        new GlobalVariable(*next_module, jl_ppvalue_llvmt,
+        new GlobalVariable(*m, jl_ppvalue_llvmt,
                            true, GlobalVariable::ExternalLinkage,
                            NULL, "jl_pgcstack");
     sys::DynamicLibrary::AddSymbol(jlpgcstack_var->getName(), (void*)&jl_pgcstack);
@@ -3432,7 +3434,7 @@ static void init_julia_llvm_env(Module *m)
     Function *jl__stack_chk_fail =
         Function::Create(FunctionType::get(T_void, false),
                          Function::ExternalLinkage,
-                         "__stack_chk_fail", next_module);
+                         "__stack_chk_fail", m);
     //jl__stack_chk_fail->setDoesNotReturn();
     sys::DynamicLibrary::AddSymbol(jl__stack_chk_fail->getName(), (void*)&__stack_chk_fail);
 
@@ -3456,7 +3458,7 @@ static void init_julia_llvm_env(Module *m)
     
     // Has to be big enough for the biggest LLVM-supported float type
     jlfloattemp_var =
-        new GlobalVariable(*next_module, IntegerType::get(jl_LLVMContext,128),
+        new GlobalVariable(*m, IntegerType::get(jl_LLVMContext,128),
                            false, GlobalVariable::ExternalLinkage, 
                            ConstantInt::get(IntegerType::get(jl_LLVMContext,128),0),
                            "jl_float_temp");
@@ -3466,7 +3468,7 @@ static void init_julia_llvm_env(Module *m)
     jlerror_func =
         Function::Create(FunctionType::get(T_void, args1, false),
                          Function::ExternalLinkage,
-                         "jl_error", next_module);
+                         "jl_error", m);
     jlerror_func->setDoesNotReturn();
     sys::DynamicLibrary::AddSymbol(jlerror_func->getName(), (void*)&jl_error);
 
@@ -3475,7 +3477,7 @@ static void init_julia_llvm_env(Module *m)
     jlthrow_func =
         Function::Create(FunctionType::get(T_void, args1_, false),
                          Function::ExternalLinkage,
-                         "jl_throw", next_module);
+                         "jl_throw", m);
     jlthrow_func->setDoesNotReturn();
     sys::DynamicLibrary::AddSymbol(jlthrow_func->getName(), (void*)&jl_throw);
 
@@ -3483,14 +3485,14 @@ static void init_julia_llvm_env(Module *m)
     args2_throw.push_back(jl_pvalue_llvmt);
     args2_throw.push_back(T_int32);
     jlthrow_line_func =
-        (Function*)next_module->getOrInsertFunction("jl_throw_with_superfluous_argument",
+        (Function*)m->getOrInsertFunction("jl_throw_with_superfluous_argument",
                                                   FunctionType::get(T_void, args2_throw, false));
     jlthrow_line_func->setDoesNotReturn();
     sys::DynamicLibrary::AddSymbol(jlthrow_line_func->getName(), (void*)&jl_throw_with_superfluous_argument);
 
     jlnew_func =
         Function::Create(jl_func_sig, Function::ExternalLinkage,
-                         "jl_new_structv", next_module);
+                         "jl_new_structv", m);
     sys::DynamicLibrary::AddSymbol(jlnew_func->getName(), (void*)&jl_new_structv);
 
     std::vector<Type*> args2(0);
@@ -3500,7 +3502,7 @@ static void init_julia_llvm_env(Module *m)
 #endif
     setjmp_func =
         Function::Create(FunctionType::get(T_int32, args2, false),
-                         Function::ExternalLinkage, "sigsetjmp", next_module);
+                         Function::ExternalLinkage, "sigsetjmp", m);
         //Intrinsic::getDeclaration(jl_Module, Intrinsic::eh_sjlj_setjmp);
 #if LLVM32 && !LLVM33
     setjmp_func->addFnAttr(Attributes::ReturnsTwice);
@@ -3517,7 +3519,7 @@ static void init_julia_llvm_env(Module *m)
     jltypeerror_func =
         Function::Create(FunctionType::get(T_void, te_args, false),
                          Function::ExternalLinkage,
-                         "jl_type_error_rt", next_module);
+                         "jl_type_error_rt", m);
     jltypeerror_func->setDoesNotReturn();
     sys::DynamicLibrary::AddSymbol(jltypeerror_func->getName(),
                                          (void*)&jl_type_error_rt);
@@ -3528,7 +3530,7 @@ static void init_julia_llvm_env(Module *m)
     jlcheckassign_func =
         Function::Create(FunctionType::get(T_void, args_2ptrs, false),
                          Function::ExternalLinkage,
-                         "jl_checked_assignment", next_module);
+                         "jl_checked_assignment", m);
     sys::DynamicLibrary::AddSymbol(jlcheckassign_func->getName(),
                                          (void*)&jl_checked_assignment);
 
@@ -3537,7 +3539,7 @@ static void init_julia_llvm_env(Module *m)
     jldeclareconst_func =
         Function::Create(FunctionType::get(T_void, args_1ptr, false),
                          Function::ExternalLinkage,
-                         "jl_declare_constant", next_module);
+                         "jl_declare_constant", m);
     sys::DynamicLibrary::AddSymbol(jldeclareconst_func->getName(),
                                          (void*)&jl_declare_constant);
 
@@ -3551,19 +3553,19 @@ static void init_julia_llvm_env(Module *m)
     jlbox_func =
         Function::Create(FunctionType::get(jl_pvalue_llvmt, args3, false),
                          Function::ExternalLinkage,
-                         "jl_new_box", next_module);
+                         "jl_new_box", m);
     sys::DynamicLibrary::AddSymbol(jlbox_func->getName(), (void*)&jl_new_box);
 
     jltopeval_func =
         Function::Create(FunctionType::get(jl_pvalue_llvmt, args3, false),
                          Function::ExternalLinkage,
-                         "jl_toplevel_eval", next_module);
+                         "jl_toplevel_eval", m);
     sys::DynamicLibrary::AddSymbol(jltopeval_func->getName(), (void*)&jl_toplevel_eval);
 
     jlcopyast_func =
         Function::Create(FunctionType::get(jl_pvalue_llvmt, args3, false),
                          Function::ExternalLinkage,
-                         "jl_copy_ast", next_module);
+                         "jl_copy_ast", m);
     sys::DynamicLibrary::AddSymbol(jlcopyast_func->getName(), (void*)&jl_copy_ast);
 
     std::vector<Type*> args4(0);
@@ -3573,7 +3575,7 @@ static void init_julia_llvm_env(Module *m)
     jlclosure_func =
         Function::Create(FunctionType::get(jl_pvalue_llvmt, args4, false),
                          Function::ExternalLinkage,
-                         "jl_new_closure", next_module);
+                         "jl_new_closure", m);
     sys::DynamicLibrary::AddSymbol(jlclosure_func->getName(),
                                          (void*)&jl_new_closure);
 
@@ -3582,7 +3584,7 @@ static void init_julia_llvm_env(Module *m)
     jlntuple_func =
         Function::Create(FunctionType::get(jl_pvalue_llvmt, args5, true),
                          Function::ExternalLinkage,
-                         "jl_tuple", next_module);
+                         "jl_tuple", m);
     sys::DynamicLibrary::AddSymbol(jlntuple_func->getName(), (void*)&jl_tuple);
 
     std::vector<Type*> mdargs(0);
@@ -3594,7 +3596,7 @@ static void init_julia_llvm_env(Module *m)
     jlmethod_func =
         Function::Create(FunctionType::get(jl_pvalue_llvmt, mdargs, false),
                          Function::ExternalLinkage,
-                         "jl_method_def", next_module);
+                         "jl_method_def", m);
     sys::DynamicLibrary::AddSymbol(jlmethod_func->getName(), (void*)&jl_method_def);
 
     std::vector<Type*> ehargs(0);
@@ -3602,12 +3604,12 @@ static void init_julia_llvm_env(Module *m)
     jlenter_func =
         Function::Create(FunctionType::get(T_void, ehargs, false),
                          Function::ExternalLinkage,
-                         "jl_enter_handler", next_module);
+                         "jl_enter_handler", m);
     sys::DynamicLibrary::AddSymbol(jlenter_func->getName(), (void*)&jl_enter_handler);
 
 #ifdef _OS_WINDOWS_
     resetstkoflw_func = Function::Create(FunctionType::get(T_void, false),
-            Function::ExternalLinkage, "_resetstkoflw", next_module);
+            Function::ExternalLinkage, "_resetstkoflw", m);
     sys::DynamicLibrary::AddSymbol(resetstkoflw_func->getName(), (void*)&_resetstkoflw);
 #endif
 
@@ -3616,7 +3618,7 @@ static void init_julia_llvm_env(Module *m)
     jlleave_func =
         Function::Create(FunctionType::get(T_void, lhargs, false),
                          Function::ExternalLinkage,
-                         "jl_pop_handler", next_module);
+                         "jl_pop_handler", m);
     sys::DynamicLibrary::AddSymbol(jlleave_func->getName(), (void*)&jl_pop_handler);
 
     std::vector<Type *> args_2vals(0);
@@ -3625,7 +3627,7 @@ static void init_julia_llvm_env(Module *m)
     jlegal_func =
         Function::Create(FunctionType::get(T_int32, args_2vals, false),
                          Function::ExternalLinkage,
-                         "jl_egal", next_module);
+                         "jl_egal", m);
     sys::DynamicLibrary::AddSymbol(jlegal_func->getName(), (void*)&jl_egal);
 
     std::vector<Type*> aoargs(0);
@@ -3633,26 +3635,26 @@ static void init_julia_llvm_env(Module *m)
     jlallocobj_func =
         Function::Create(FunctionType::get(jl_pvalue_llvmt, aoargs, false),
                          Function::ExternalLinkage,
-                         "allocobj", next_module);
+                         "allocobj", m);
     sys::DynamicLibrary::AddSymbol(jlallocobj_func->getName(), (void*)&allocobj);
 
     std::vector<Type*> empty_args(0);
     jlalloc1w_func =
         Function::Create(FunctionType::get(jl_pvalue_llvmt, empty_args, false),
                          Function::ExternalLinkage,
-                         "alloc_1w", next_module);
+                         "alloc_1w", m);
     sys::DynamicLibrary::AddSymbol(jlalloc1w_func->getName(), (void*)&alloc_1w);
 
     jlalloc2w_func =
         Function::Create(FunctionType::get(jl_pvalue_llvmt, empty_args, false),
                          Function::ExternalLinkage,
-                         "alloc_2w", next_module);
+                         "alloc_2w", m);
     sys::DynamicLibrary::AddSymbol(jlalloc2w_func->getName(), (void*)&alloc_2w);
 
     jlalloc3w_func =
         Function::Create(FunctionType::get(jl_pvalue_llvmt, empty_args, false),
                          Function::ExternalLinkage,
-                         "alloc_3w", next_module);
+                         "alloc_3w", m);
     sys::DynamicLibrary::AddSymbol(jlalloc3w_func->getName(), (void*)&alloc_3w);
     
     std::vector<Type*> atargs(0);
@@ -3660,7 +3662,7 @@ static void init_julia_llvm_env(Module *m)
     jl_alloc_tuple_func = 
         Function::Create(FunctionType::get(jl_pvalue_llvmt, atargs, false),
                          Function::ExternalLinkage,
-                         "jl_alloc_tuple", next_module);
+                         "jl_alloc_tuple", m);
     sys::DynamicLibrary::AddSymbol(jl_alloc_tuple_func->getName(), (void*)&jl_alloc_tuple);
 
     std::vector<Type *> puts_args(0);
@@ -3669,11 +3671,11 @@ static void init_julia_llvm_env(Module *m)
     jlputs_func =
         Function::Create(FunctionType::get(T_void, puts_args, false),
                          Function::ExternalLinkage,
-                         "jl_puts", next_module);
+                         "jl_puts", m);
     sys::DynamicLibrary::AddSymbol(jlputs_func->getName(), (void*)&jl_puts);
 
     // set up optimization passes
-    FPM = new FunctionPassManager(next_module);
+    FPM = new FunctionPassManager(m);
 
     
 #ifdef LLVM32
@@ -3781,6 +3783,9 @@ extern "C" void jl_init_codegen(void)
     dbuilder = new DIBuilder(*next_module);
 
     init_julia_llvm_env(next_module);
+
+    next_module = new Module("julia", jl_LLVMContext);
+    jl_ExecutionEngine->addModule(next_module);
 
     jl_jit_events = new JuliaJITEventListener();
     jl_ExecutionEngine->RegisterJITEventListener(jl_jit_events);

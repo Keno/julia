@@ -17,7 +17,7 @@ FLAGS = \
 	-I$(LIBUV_INC) -I$(JULIAHOME)/usr/include \
 	-I$(JULIAHOME)/deps/llvm-$(LLVM_VER)/tools/clang/lib
 
-LLVMLINK = $(call exec,$(LLVM_CONFIG) --libs)
+LLVMLINK = -lncurses $(call exec,$(LLVM_CONFIG) --libs) -lcurses
 ifeq ($(USE_LLVM_SHLIB),1)
 LLVMLINK = -lLLVM-$(LLVM_VER)
 endif
@@ -28,7 +28,7 @@ CLANG_LIBS = -lclangFrontendTool -lclangBasic -lclangLex -lclangDriver -lclangFr
     -lclangStaticAnalyzerCore -lclangStaticAnalyzerFrontend -lclangTooling \
     -lclangCodeGen -lclangARCMigrate
 
-LIBS = $(WHOLE_ARCHIVE) $(JULIAHOME)/src/flisp/libflisp.a $(WHOLE_ARCHIVE) $(JULIAHOME)/src/support/libsupport.a -L$(BUILD)/lib $(LIBUV) $(CLANG_LIBS) $(NO_WHOLE_ARCHIVE) $(call exec,$(LLVM_CONFIG) --ldflags) $(LLVMLINK) $(OSLIBS)
+LIBS = $(WHOLE_ARCHIVE) $(JULIAHOME)/src/flisp/libflisp.a $(WHOLE_ARCHIVE) $(JULIAHOME)/src/support/libsupport.a -L$(BUILD)/lib $(LIBUV) $(CLANG_LIBS) $(NO_WHOLE_ARCHIVE) $(call exec,$(LLVM_CONFIG) --ldflags) -ltinfo $(LLVMLINK) $(OSLIBS)
 
 ifneq ($(MAKECMDGOALS),debug)
 TARGET =
