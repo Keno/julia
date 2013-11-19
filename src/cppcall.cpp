@@ -35,6 +35,7 @@ static clang::CompilerInstance *clang_compiler;
 static clang::CodeGen::CodeGenModule *clang_cgm;
 static clang::CodeGen::CodeGenTypes *clang_cgt;
 static clang::CodeGen::CodeGenFunction *clang_cgf;
+static DataLayout *TD;
 
 // clang types
 static clang::CanQualType cT_int1;
@@ -114,7 +115,8 @@ struct FooBar {
   unsigned FormatInMemoryUniqueId;
 };
 
-DLLEXPORT extern "C" void init_header(char *name)
+extern "C" {
+DLLEXPORT void init_header(char *name)
 {
     clang::FileManager &fm = clang_compiler->getFileManager();
     clang::Preprocessor &pp = clang_compiler->getPreprocessor();
@@ -138,8 +140,7 @@ DLLEXPORT extern "C" void init_header(char *name)
     clang::ParseAST(clang_compiler->getSema());
 }
 
-
-DLLEXPORT extern "C" void init_julia_clang_env(void *module) {
+DLLEXPORT void init_julia_clang_env(void *module) {
     //copied from http://www.ibm.com/developerworks/library/os-createcompilerllvm2/index.html
     clang_compiler = new clang::CompilerInstance;
     clang_compiler->createDiagnostics();
@@ -159,15 +160,7 @@ DLLEXPORT extern "C" void init_julia_clang_env(void *module) {
     clang_astcontext = &clang_compiler->getASTContext();
     clang_compiler->setASTConsumer(new JuliaCodeGenerator());
     clang_compiler->createSema(clang::TU_Prefix,NULL);
-    DataLayout *TD = new DataLayout(tin->getTargetDescription());
-    clang_cgm = new clang::CodeGen::CodeGenModule(
-            *clang_astcontext,
-            clang_compiler->getCodeGenOpts(),
-            *((llvm::Module*)module),
-            *TD,
-            clang_compiler->getDiagnostics());
-    clang_cgt = new clang::CodeGen::CodeGenTypes(*clang_cgm);
-    clang_cgf = new clang::CodeGen::CodeGenFunction(*clang_cgm);
+    TD = new DataLayout(tin->getTargetDescription());
     
     cT_int1  = clang_astcontext->BoolTy;
     cT_int8  = clang_astcontext->SignedCharTy;
@@ -197,8 +190,19 @@ DLLEXPORT extern "C" void init_julia_clang_env(void *module) {
     cT_pvoid = clang_astcontext->getPointerType(cT_void);
 }
 
-DLLEXPORT extern "C" void *setup_cpp_env(void *module, void *jlfunc)
+DLLEXPORT void *setup_cpp_env(void *module, void *jlfunc)
 {
+    // This sucks. We have to do this because MCJIT requires us to have a new module every time.
+    // When we change the way Julia handles llvm modules, this also needs to change. For now
+    // this is fine as long as we don't compile too much C code, but I'm still not very happy with this.
+    clang_cgm = new clang::CodeGen::CodeGenModule(
+            *clang_astcontext,
+            clang_compiler->getCodeGenOpts(),
+            *((llvm::Module*)module),
+            *TD,
+            clang_compiler->getDiagnostics());
+    clang_cgt = new clang::CodeGen::CodeGenTypes(*clang_cgm);
+    clang_cgf = new clang::CodeGen::CodeGenFunction(*clang_cgm);
 
     llvm::Function *w = (Function *)jlfunc;
 
@@ -223,10 +227,14 @@ DLLEXPORT extern "C" void *setup_cpp_env(void *module, void *jlfunc)
     return alloca_bb_ptr;
 }
 
-DLLEXPORT extern "C" void cleanup_cpp_env(void *alloca_bb_ptr)
+DLLEXPORT void cleanup_cpp_env(void *alloca_bb_ptr)
 {
     clang_compiler->getSema().PerformPendingInstantiations(false);
     clang_cgm->Release();
+
+    free(clang_cgm);
+    free(clang_cgt);
+    free(clang_cgf);
 
     // cleanup the environment
     clang_cgf->AllocaInsertPt = 0; // free this ptr reference
@@ -234,7 +242,7 @@ DLLEXPORT extern "C" void cleanup_cpp_env(void *alloca_bb_ptr)
         ((llvm::Instruction *)alloca_bb_ptr)->eraseFromParent();
 }
 
-DLLEXPORT extern "C" void emit_cpp_new(void *type)
+DLLEXPORT void emit_cpp_new(void *type)
 {
     clang::Decl* MD = ((clang::Decl *)type);
     clang::CXXRecordDecl* cdecl = dyn_cast<clang::CXXRecordDecl>(MD);
@@ -304,7 +312,7 @@ DLLEXPORT extern "C" void *construct_CXXTemporaryObjectExpr(void *d)
 }
  */
 
-DLLEXPORT extern "C" void *get_nth_argument(Function *f, size_t n)
+DLLEXPORT void *get_nth_argument(Function *f, size_t n)
 {
     size_t i = 0;
     Function::arg_iterator AI = clang_cgf->CurFn->arg_begin();
@@ -316,17 +324,17 @@ DLLEXPORT extern "C" void *get_nth_argument(Function *f, size_t n)
     return NULL;
 }
 
-DLLEXPORT extern "C" void *create_extract_value(Value *agg, size_t idx)
+DLLEXPORT void *create_extract_value(Value *agg, size_t idx)
 {
     return clang_cgf->Builder.CreateExtractValue(agg,ArrayRef<unsigned>((unsigned)idx));
 }
 
-DLLEXPORT extern "C" void *create_insert_value(Value *agg, Value *val, size_t idx)
+DLLEXPORT void *create_insert_value(Value *agg, Value *val, size_t idx)
 {
     return clang_cgf->Builder.CreateInsertValue(agg,val,ArrayRef<unsigned>((unsigned)idx));
 }
 
-DLLEXPORT extern "C" void *lookup_name(char *name, clang::Decl *decl)
+DLLEXPORT void *lookup_name(char *name, clang::Decl *decl)
 {
     clang::SourceManager &sm = clang_compiler->getSourceManager();
     clang::CXXScopeSpec spec;
@@ -342,17 +350,17 @@ DLLEXPORT extern "C" void *lookup_name(char *name, clang::Decl *decl)
     return R.empty() ? NULL : R.getRepresentativeDecl();
 }
 
-DLLEXPORT extern "C" void *tu_decl()
+DLLEXPORT void *tu_decl()
 {
     return clang_astcontext->getTranslationUnitDecl();
 }
 
-DLLEXPORT extern "C" void *get_primary_dc(clang::DeclContext *dc)
+DLLEXPORT void *get_primary_dc(clang::DeclContext *dc)
 {
     return dc->getPrimaryContext();
 }
 
-DLLEXPORT extern "C" void *decl_context(clang::Decl *decl)
+DLLEXPORT void *decl_context(clang::Decl *decl)
 {
     if(isa<clang::TypedefNameDecl>(decl))
     {
@@ -370,32 +378,27 @@ DLLEXPORT extern "C" void *decl_context(clang::Decl *decl)
     return dyn_cast<clang::DeclContext>(decl);
 }
 
-DLLEXPORT extern "C" void *to_decl(clang::DeclContext *decl)
+DLLEXPORT void *to_decl(clang::DeclContext *decl)
 {
     return dyn_cast<clang::Decl>(decl);
 }
 
 
-DLLEXPORT extern "C" void *get_result_type(void *cppfunc)
+DLLEXPORT void *get_result_type(void *cppfunc)
 {
     clang::Decl* MD = ((clang::Decl *)cppfunc);
     clang::FunctionDecl* fdecl = dyn_cast<clang::FunctionDecl>(MD);
     return (void*)fdecl->getResultType().getTypePtr();
 }
 
-DLLEXPORT extern "C" void *emit_field_ref(clang::Type *BaseType, Value *BaseVal, clang::FieldDecl *FieldDecl)
+DLLEXPORT void *emit_field_ref(clang::Type *BaseType, Value *BaseVal, clang::FieldDecl *FieldDecl)
 {
     clang::CodeGen::LValue BaseLV = clang_cgf->MakeNaturalAlignAddrLValue(BaseVal,clang::QualType(BaseType,0));
     clang::CodeGen::LValue LV = clang_cgf->EmitLValueForField(BaseLV,FieldDecl);
     return LV.getAddress();
 }
 
-DLLEXPORT extern "C" void emit_cpp_assign()
-{
-
-}
-
-DLLEXPORT extern "C" Value *emit_cpp_call(void *cppfunc, Value **args, size_t nargs, bool Forward, bool EmitReturn)
+DLLEXPORT Value *emit_cpp_call(void *cppfunc, Value **args, size_t nargs, bool Forward, bool EmitReturn)
 {
     clang::Decl* MD = ((clang::Decl *)cppfunc);
     clang::FunctionDecl* fdecl = dyn_cast<clang::FunctionDecl>(MD);
@@ -508,7 +511,7 @@ DLLEXPORT extern "C" Value *emit_cpp_call(void *cppfunc, Value **args, size_t na
     return ret;
 }
 
-DLLEXPORT extern "C" char *decl_name(clang::NamedDecl *decl)
+DLLEXPORT char *decl_name(clang::NamedDecl *decl)
 {
     std::string str = decl->getQualifiedNameAsString().data();
     char * cstr = (char*)malloc(str.length()+1);
@@ -516,37 +519,38 @@ DLLEXPORT extern "C" char *decl_name(clang::NamedDecl *decl)
     return cstr;
 }
 
-DLLEXPORT extern "C" void *referenced_type(clang::Type *t)
+DLLEXPORT void *referenced_type(clang::Type *t)
 {
     return (void*)t->getPointeeType().getTypePtr();
 }
 
-DLLEXPORT extern "C" void *clang_get_instance()
+DLLEXPORT void *clang_get_instance()
 {
     return clang_compiler;
 }
 
-DLLEXPORT extern "C" void *clang_get_cgm()
+DLLEXPORT void *clang_get_cgm()
 {
     return clang_cgm;
 }
 
-DLLEXPORT extern "C" void *clang_get_cgf()
+DLLEXPORT void *clang_get_cgf()
 {
     return clang_cgf;
 }
 
-DLLEXPORT extern "C" void *clang_get_cgt()
+DLLEXPORT void *clang_get_cgt()
 {
     return clang_cgt;
 }
 
-DLLEXPORT extern "C" void *clang_get_builder()
+DLLEXPORT void *clang_get_builder()
 {
     return (void*)&clang_cgf->Builder;
 }
 
-DLLEXPORT extern "C" void cdump(void *decl)
+DLLEXPORT void cdump(void *decl)
 {
     ((clang::Decl*) decl)->dump();
+}
 }

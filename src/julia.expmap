@@ -1,5 +1,6 @@
 {
   global:
+    *;
     asprintf;
     bitvector_any1;
     bitvector_count;

@@ -44,7 +44,7 @@ namespace JL_I {
 using namespace JL_I;
 
 #include "ccall.cpp"
-//#include "cppcall.cpp"
+#include "cppcall.cpp"
 
 /*
   low-level intrinsics design:
@@ -1148,10 +1148,10 @@ static Value *emit_intrinsic(intrinsic f, jl_value_t **args, size_t nargs,
 #undef HANDLE
 
 static Function *boxfunc_llvm(FunctionType *ft, const std::string &cname,
-                              void *addr)
+                              void *addr, Module *mod)
 {
     Function *f =
-        Function::Create(ft, Function::ExternalLinkage, cname, next_module);
+        Function::Create(ft, Function::ExternalLinkage, cname, mod);
     sys::DynamicLibrary::AddSymbol(f->getName(), addr);
     return f;
 }
@@ -1173,7 +1173,7 @@ static FunctionType *ft2arg(Type *ret, Type *arg1, Type *arg2)
 
 #define BOX_F(ct,jl_ct)                                                       \
     box_##ct##_func = boxfunc_llvm(ft1arg(jl_pvalue_llvmt, T_##jl_ct),     \
-                                   "jl_box_"#ct, (void*)&jl_box_##ct);
+                                   "jl_box_"#ct, (void*)&jl_box_##ct, dummy_module);
 
 static void add_intrinsic(jl_module_t *m, const std::string &name, intrinsic f)
 {

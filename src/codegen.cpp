@@ -113,9 +113,7 @@ static LLVMContext &jl_LLVMContext = getGlobalContext();
 static IRBuilder<> builder(getGlobalContext());
 static bool nested_compile=false;
 #define jl_Module (builder.GetInsertBlock()->getParent()->getParent())
-static llvm::Module *next_module;
 static ExecutionEngine *jl_ExecutionEngine;
-static DIBuilder *dbuilder;
 static std::map<int, std::string> argNumberStrings;
 static FunctionPassManager *FPM;
 
@@ -341,7 +339,6 @@ extern "C" void jl_generate_fptr(jl_function_t *f)
             llvmf->dump();
             llvmf->getParent()->dump();
             jl_Module->dump();
-            next_module->dump();
             li->fptr = (jl_fptr_t)jl_ExecutionEngine->getFunctionAddress(llvmf->getName());
             abort();
         }
@@ -2672,7 +2669,7 @@ static void finalize_gc_frame(jl_codectx_t *ctx)
 static Function *gen_jlcall_wrapper(jl_lambda_info_t *lam, jl_expr_t *ast, Function *f)
 {
     Function *w = Function::Create(jl_func_sig, Function::ExternalLinkage,
-                                   f->getName(), next_module);
+                                   f->getName(), f->getParent());
     Function::arg_iterator AI = w->arg_begin();
     AI++; //const Argument &fArg = *AI++;
     Value *argArray = AI++;
@@ -2883,7 +2880,12 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
     }
 
     std::stringstream funcName;
-    funcName << "julia_" << lam->name->name << globalUnique++;
+    funcName << "julia_" << lam->name->name;
+
+    Module *mod = new Module(funcName.str(), jl_LLVMContext);
+    jl_ExecutionEngine->addModule(mod);
+
+    funcName << globalUnique++;
 
     if (specsig) {
         std::vector<Type*> fsig(0);
@@ -2895,11 +2897,10 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
                 ctx.vars[jl_decl_var(jl_cellref(largs,i))].isGhost = true;
             }
         }
-        Type *rt = (jlrettype == (jl_value_t*)jl_nothing->type ? T_void : julia_type_to_llvm(jlrettype));
-        next_module = new Module("julia", jl_LLVMContext);
-        jl_ExecutionEngine->addModule(next_module);
+        Type *rt = (jlrettype == (jl_value_t*)jl_nothing->type ? T_void : julia_type_to_llvm(jlrettype));     
+        
         f = Function::Create(FunctionType::get(rt, fsig, false),
-                             Function::ExternalLinkage, funcName.str(), next_module);
+                             Function::ExternalLinkage, funcName.str(), mod);
         if (lam->cFunctionObject == NULL) {
             lam->cFunctionObject = (void*)f;
         }
@@ -2908,14 +2909,14 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
         }
     }
     else {
-        next_module = new Module("julia", jl_LLVMContext);
-        jl_ExecutionEngine->addModule(next_module);
         f = Function::Create(jl_func_sig, Function::ExternalLinkage,
-                             funcName.str(), next_module);
+                             funcName.str(), mod);
         if (lam->functionObject == NULL) {
             lam->functionObject = (void*)f;
         }
     }
+
+    DIBuilder dbuilder(*mod);
     //TODO: this seems to cause problems, but should be made to work eventually
     //if (jlrettype == (jl_value_t*)jl_bottom_type)
     //    f->setDoesNotReturn();
@@ -2958,7 +2959,7 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
     BasicBlock *b0 = BasicBlock::Create(jl_LLVMContext, "top", f);
     builder.SetInsertPoint(b0);
 
-    llvm::DIArray EltTypeArray = dbuilder->getOrCreateArray(ArrayRef<Value*>());
+    llvm::DIArray EltTypeArray = dbuilder.getOrCreateArray(ArrayRef<Value*>());
     DIFile fil;
     DISubprogram SP;
     //ios_printf(ios_stderr, "\n*** compiling %s at %s:%d\n\n",
@@ -2974,21 +2975,21 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
     else {
         // TODO: Fix when moving to new LLVM version
         #ifndef LLVM34
-        dbuilder->createCompileUnit(0x01, filename, ".", "julia", true, "", 0);
+        dbuilder.createCompileUnit(0x01, filename, ".", "julia", true, "", 0);
         #else
-        DICompileUnit CU = dbuilder->createCompileUnit(0x01, filename, ".", "julia", true, "", 0);
+        DICompileUnit CU = dbuilder.createCompileUnit(0x01, filename, ".", "julia", true, "", 0);
         #endif
 
-        fil = dbuilder->createFile(filename, ".");
+        fil = dbuilder.createFile(filename, ".");
         #ifndef LLVM34
-        SP = dbuilder->createFunction((DIDescriptor)dbuilder->getCU(),
+        SP = dbuilder.createFunction((DIDescriptor)dbuilder.getCU(),
         #else 
-        SP = dbuilder->createFunction(CU,
+        SP = dbuilder.createFunction(CU,
         #endif
-                                      dbgFuncName, dbgFuncName,
+                                      lam->name->name, funcName.str(),
                                       fil,
-                                      0,
-                                      dbuilder->createSubroutineType(fil,EltTypeArray),
+                                      lno,
+                                      dbuilder.createSubroutineType(fil,EltTypeArray),
                                       false, true,
                                       0, true, f);
         // set initial line number
@@ -3337,27 +3338,31 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
             jl_error("Inlining Pass failed");
     }
 
+    // step 18. Perform any delayed instantiations
+    if (debug_enabled)
+        dbuilder.finalize();
+
     JL_GC_POP();
     return f;
 }
 
 // --- initialization ---
 
-static GlobalVariable *global_to_llvm(const std::string &cname, void *addr)
+static GlobalVariable *global_to_llvm(const std::string &cname, void *addr, Module *mod)
 {
     GlobalVariable *gv =
-        new GlobalVariable(*next_module, jl_pvalue_llvmt,
+        new GlobalVariable(*mod, jl_pvalue_llvmt,
                            true, GlobalVariable::ExternalLinkage,
                            NULL, cname);
     sys::DynamicLibrary::AddSymbol(gv->getName(), addr);
     return gv;
 }
 
-static Function *jlfunc_to_llvm(const std::string &cname, void *addr)
+static Function *jlfunc_to_llvm(const std::string &cname, void *addr, Module *mod)
 {
     Function *f =
         Function::Create(jl_func_sig, Function::ExternalLinkage,
-                         cname, next_module);
+                         cname, mod);
     sys::DynamicLibrary::AddSymbol(f->getName(), addr);
     return f;
 }
@@ -3430,7 +3435,7 @@ static void init_julia_llvm_env(Module *m)
     sys::DynamicLibrary::AddSymbol(jlpgcstack_var->getName(), (void*)&jl_pgcstack);
 #endif
 
-    global_to_llvm("__stack_chk_guard", (void*)&__stack_chk_guard);
+    global_to_llvm("__stack_chk_guard", (void*)&__stack_chk_guard, m);
     Function *jl__stack_chk_fail =
         Function::Create(FunctionType::get(T_void, false),
                          Function::ExternalLinkage,
@@ -3438,23 +3443,23 @@ static void init_julia_llvm_env(Module *m)
     //jl__stack_chk_fail->setDoesNotReturn();
     sys::DynamicLibrary::AddSymbol(jl__stack_chk_fail->getName(), (void*)&__stack_chk_fail);
 
-    jltrue_var = global_to_llvm("jl_true", (void*)&jl_true);
-    jlfalse_var = global_to_llvm("jl_false", (void*)&jl_false);
-    jlnull_var = global_to_llvm("jl_null", (void*)&jl_null);
+    jltrue_var = global_to_llvm("jl_true", (void*)&jl_true, m);
+    jlfalse_var = global_to_llvm("jl_false", (void*)&jl_false, m);
+    jlnull_var = global_to_llvm("jl_null", (void*)&jl_null, m);
     jlexc_var = global_to_llvm("jl_exception_in_transit",
-                               (void*)&jl_exception_in_transit);
+                               (void*)&jl_exception_in_transit, m);
     jldiverr_var = global_to_llvm("jl_diverror_exception",
-                                  (void*)&jl_diverror_exception);
+                                  (void*)&jl_diverror_exception, m);
     jlundeferr_var = global_to_llvm("jl_undefref_exception",
-                                    (void*)&jl_undefref_exception);
+                                    (void*)&jl_undefref_exception, m);
     jldomerr_var = global_to_llvm("jl_domain_exception",
-                                  (void*)&jl_domain_exception);
+                                  (void*)&jl_domain_exception, m);
     jlovferr_var = global_to_llvm("jl_overflow_exception",
-                                  (void*)&jl_overflow_exception);
+                                  (void*)&jl_overflow_exception, m);
     jlinexacterr_var = global_to_llvm("jl_inexact_exception",
-                                      (void*)&jl_inexact_exception);
+                                      (void*)&jl_inexact_exception, m);
     jlboundserr_var = global_to_llvm("jl_bounds_exception",
-                                     (void*)&jl_bounds_exception);
+                                     (void*)&jl_bounds_exception, m);
     
     // Has to be big enough for the biggest LLVM-supported float type
     jlfloattemp_var =
@@ -3543,10 +3548,10 @@ static void init_julia_llvm_env(Module *m)
     sys::DynamicLibrary::AddSymbol(jldeclareconst_func->getName(),
                                          (void*)&jl_declare_constant);
 
-    jltuple_func = jlfunc_to_llvm("jl_f_tuple", (void*)&jl_f_tuple);
+    jltuple_func = jlfunc_to_llvm("jl_f_tuple", (void*)&jl_f_tuple, m);
     jlapplygeneric_func =
-        jlfunc_to_llvm("jl_apply_generic", (void*)&jl_apply_generic);
-    jlgetfield_func = jlfunc_to_llvm("jl_f_get_field", (void*)&jl_f_get_field);
+        jlfunc_to_llvm("jl_apply_generic", (void*)&jl_apply_generic, m);
+    jlgetfield_func = jlfunc_to_llvm("jl_f_get_field", (void*)&jl_f_get_field, m);
 
     std::vector<Type*> args3(0);
     args3.push_back(jl_pvalue_llvmt);
@@ -3736,14 +3741,14 @@ static void init_julia_llvm_env(Module *m)
 
 extern "C" void jl_init_codegen(void)
 {
-    next_module = new Module("julia", jl_LLVMContext);
+    Module *dummy_module = new Module("julia", jl_LLVMContext);
 
     InitializeNativeTarget();
     InitializeNativeTargetAsmPrinter();
     InitializeNativeTargetAsmParser();
 
 #if !defined(LLVM_VERSION_MAJOR) || (LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR == 0)
-    jl_ExecutionEngine = EngineBuilder(next_module).setEngineKind(EngineKind::JIT).create();
+    jl_ExecutionEngine = EngineBuilder(dummy_module).setEngineKind(EngineKind::JIT).create();
 #ifdef DEBUG
     llvm::JITEmitDebugInfo = true;
 #endif
@@ -3772,20 +3777,15 @@ extern "C" void jl_init_codegen(void)
     // Temporarily disable Haswell BMI2 features due to LLVM bug.
     const char *mattr[] = {"-bmi2", "-avx2"};
     std::vector<std::string> attrvec (mattr, mattr+2);
-    jl_ExecutionEngine = EngineBuilder(next_module)
+    jl_ExecutionEngine = EngineBuilder(dummy_module)
         .setEngineKind(EngineKind::JIT)
         .setTargetOptions(options)
         .setMAttrs(attrvec)
         .setUseMCJIT(true)
         .create();
 #endif // LLVM VERSION
-    
-    dbuilder = new DIBuilder(*next_module);
 
-    init_julia_llvm_env(next_module);
-
-    next_module = new Module("julia", jl_LLVMContext);
-    jl_ExecutionEngine->addModule(next_module);
+    init_julia_llvm_env(dummy_module);
 
     jl_jit_events = new JuliaJITEventListener();
     jl_ExecutionEngine->RegisterJITEventListener(jl_jit_events);
@@ -3804,13 +3804,13 @@ extern "C" void jl_init_codegen(void)
     BOX_F(char,char);
 
     box8_func  = boxfunc_llvm(ft2arg(jl_pvalue_llvmt, jl_pvalue_llvmt, T_int8),
-                              "jl_box8", (void*)&jl_box8);
+                              "jl_box8", (void*)&jl_box8, dummy_module);
     box16_func = boxfunc_llvm(ft2arg(jl_pvalue_llvmt, jl_pvalue_llvmt, T_int16),
-                              "jl_box16", (void*)&jl_box16);
+                              "jl_box16", (void*)&jl_box16, dummy_module);
     box32_func = boxfunc_llvm(ft2arg(jl_pvalue_llvmt, jl_pvalue_llvmt, T_int32),
-                              "jl_box32", (void*)&jl_box32);
+                              "jl_box32", (void*)&jl_box32, dummy_module);
     box64_func = boxfunc_llvm(ft2arg(jl_pvalue_llvmt, jl_pvalue_llvmt, T_int64),
-                              "jl_box64", (void*)&jl_box64);
+                              "jl_box64", (void*)&jl_box64, dummy_module);
 
     std::vector<Type*> toptrargs(0);
     toptrargs.push_back(jl_pvalue_llvmt);
@@ -3820,7 +3820,7 @@ extern "C" void jl_init_codegen(void)
     value_to_pointer_func =
         Function::Create(FunctionType::get(T_pint8, toptrargs, false),
                          Function::ExternalLinkage, "jl_value_to_pointer",
-                         next_module);
+                         dummy_module);
     sys::DynamicLibrary::AddSymbol(value_to_pointer_func->getName(),
                                          (void*)&jl_value_to_pointer);
 
@@ -3831,19 +3831,19 @@ extern "C" void jl_init_codegen(void)
     save_arg_area_loc_func =
         Function::Create(FunctionType::get(T_uint64, noargs, false),
                          Function::ExternalLinkage, "save_arg_area_loc",
-                         next_module);
+                         dummy_module);
     sys::DynamicLibrary::AddSymbol(save_arg_area_loc_func->getName(),
                                          (void*)&save_arg_area_loc);
 
     restore_arg_area_loc_func =
         Function::Create(ft1arg(T_void, T_uint64),
                          Function::ExternalLinkage, "restore_arg_area_loc",
-                         next_module);
+                         dummy_module);
     sys::DynamicLibrary::AddSymbol(restore_arg_area_loc_func->getName(),
                                          (void*)&restore_arg_area_loc);
 
-    next_module = new Module("julia", jl_LLVMContext);
-    jl_ExecutionEngine->addModule(next_module);
+    dummy_module = new Module("julia", jl_LLVMContext);
+    jl_ExecutionEngine->addModule(dummy_module);
 }
 
 DLLEXPORT void *jl_get_llvm_module()

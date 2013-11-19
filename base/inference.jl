@@ -121,11 +121,11 @@ t_func[eval(Core.Intrinsics,:llvmcall)] =
         Nothing
     elseif isType(rtt)
         rtt.parameters[1]
-    elseif isa(rtt,Type) && isa(rtt,Tuple)
-        return map(x->x.parameters[1],rtt)
     elseif isa(rt,Tuple) && isa(rt[1],Function)
         return rt[1](rt[2:end]...,a...)
-    else 
+    elseif isa(rtt,Type) && isa(rtt,Tuple)
+        return rtt
+    else
         return Any
     end
 end)
