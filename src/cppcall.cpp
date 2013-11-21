@@ -124,13 +124,14 @@ DLLEXPORT void init_header(char *name)
     opts.UseBuiltinIncludes = 1;
     opts.UseStandardSystemIncludes = 1;
     opts.UseStandardCXXIncludes = 1;
-    pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory("/usr/include"),clang::SrcMgr::C_System,false),true);
-    pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory("/Users/kfischer/julia/usr/lib/clang/3.3/include/"),clang::SrcMgr::C_System,false),true);
+    pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory("/usr/include/c++/4.8"),clang::SrcMgr::C_System,false),true);
+    pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory("/usr/include/x86_64-linux-gnu/c++/4.8/"),clang::SrcMgr::C_System,false),true);
+    pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory("/home/kfischer/julia/usr/lib/clang/3.3/include/"),clang::SrcMgr::C_System,false),true);
     #define DIR(X) pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory(X),clang::SrcMgr::C_User,false),false);
-    DIR("/Users/kfischer/julia/src/support")
-    DIR("/Users/kfischer/julia/usr/include")
-    DIR("/Users/kfischer/julia/deps/llvm-3.3/tools/clang/")
-    DIR("/Users/kfischer/julia/deps/llvm-3.3/tools/clang/include/")
+    DIR("/home/kfischer/julia/src/support")
+    DIR("/home/kfischer/julia/usr/include")
+    DIR("/home/kfischer/julia/deps/llvm-svn/tools/clang/")
+    DIR("/home/kfischer/julia/deps/llvm-svn/tools/clang/include/")
     clang_compiler->getDiagnosticClient().BeginSourceFile(clang_compiler->getLangOpts(), 0);
     pp.getBuiltinInfo().InitializeBuiltins(pp.getIdentifierTable(),
                                            clang_compiler->getLangOpts());
@@ -232,14 +233,22 @@ DLLEXPORT void cleanup_cpp_env(void *alloca_bb_ptr)
     clang_compiler->getSema().PerformPendingInstantiations(false);
     clang_cgm->Release();
 
-    free(clang_cgm);
-    free(clang_cgt);
-    free(clang_cgf);
+    // Set all functions and globals to external linkage (MCJIT needs this ugh)
+    for(Module::global_iterator I = jl_Module->global_begin(),
+            E = jl_Module->global_end(); I != E; ++I) {
+        I->setLinkage(llvm::GlobalVariable::ExternalLinkage);
+    }
+
+    jl_Module->dump();
 
     // cleanup the environment
     clang_cgf->AllocaInsertPt = 0; // free this ptr reference
     if (alloca_bb_ptr)
         ((llvm::Instruction *)alloca_bb_ptr)->eraseFromParent();
+
+    free(clang_cgm);
+    free(clang_cgt);
+    free(clang_cgf);
 }
 
 DLLEXPORT void emit_cpp_new(void *type)

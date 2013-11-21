@@ -250,7 +250,7 @@ endif
 
 
 ifeq ($(LLVM_SANITIZE),1)
-LLVM_CC = FC="$(FC)" CC="$(CC) -fsanitize=address" CXX="$(CXX) -fsanitize=address" 
+LLVM_CC = $(CONFIGURE_CC) CXXFLAGS="-fsanitize=address" CFLAGS="-fsanitize=address" LDFLAGS="-fsanitize=address"
 LLVM_MFLAGS += TOOL_NO_EXPORTS= HAVE_LINK_VERSION_SCRIPT=0
 else
 LLVM_CC = $(CONFIGURE_CC)
@@ -331,7 +331,7 @@ ifneq ($(BUILD_LLVM_CLANG),)
 		(cd llvm-$(LLVM_VER)/tools/clang  && \
 		git pull --ff-only)
 	([ ! -d llvm-$(LLVM_VER)/projects/compiler-rt ] && \
-		git clone http://llvm.org/git/compiler-rt.git llvm-$(LLVM_VER)/tools/clang  ) || \
+		git clone http://llvm.org/git/compiler-rt.git llvm-$(LLVM_VER)/projects/compiler-rt  ) || \
 		(cd llvm-$(LLVM_VER)/projects/compiler-rt  && \
 		git pull --ff-only)		
 ifneq ($(LLVM_CLANG_VER),)

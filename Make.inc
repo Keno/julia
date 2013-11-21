@@ -132,11 +132,11 @@ USE_COPY_STACKS = 1
 # Compiler specific stuff
 
 ifeq ($(CC), clang)
-USEGCC = 0
-USECLANG = 1
+USEGCC ?= 0
+USECLANG ?= 1
 else
-USEGCC = 1
-USECLANG = 0
+USEGCC ?= 1
+USECLANG ?= 0
 endif
 
 STDLIBCPP_FLAG = 
@@ -219,7 +219,9 @@ include $(JULIAHOME)/Make.user
 endif
 
 ifeq ($(SANITIZE),1)
-CXX += -fsanitize=address
+JCXXFLAGS += -fsanitize=address
+JCFLAGS += -fsanitize=address
+LDFLAGS += -fsanitize=address
 endif
 
 # ===========================================================================
