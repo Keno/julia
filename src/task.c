@@ -151,7 +151,7 @@ static void start_task(jl_task_t *t);
 #ifdef COPY_STACKS
 jl_jmp_buf * volatile jl_jmp_target;
 
-static void save_stack(jl_task_t *t)
+static void __attribute__((no_sanitize_address)) save_stack(jl_task_t *t)
 {
     if (t->done)
         return;
@@ -167,6 +167,14 @@ static void save_stack(jl_task_t *t)
         buf = t->stkbuf;
     }
     t->ssize = nb;
+    #if defined(__has_feature)
+    #  if __has_feature(address_sanitizer)
+        for (size_t i = 0; i < nb; ++i) {
+            buf[i] = ((char*)&_x)[i];
+        }
+        return;
+    #  endif
+    #endif
     memcpy(buf, (char*)&_x, nb);
 }
 

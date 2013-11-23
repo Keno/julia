@@ -219,9 +219,9 @@ include $(JULIAHOME)/Make.user
 endif
 
 ifeq ($(SANITIZE),1)
-JCXXFLAGS += -fsanitize=address
-JCFLAGS += -fsanitize=address
-LDFLAGS += -fsanitize=address
+JCXXFLAGS += -fsanitize=address -mllvm -asan-stack=0
+JCFLAGS += -fsanitize=address -mllvm -asan-stack=0
+LDFLAGS += -fsanitize=address -mllvm -asan-stack=0
 endif
 
 # ===========================================================================
