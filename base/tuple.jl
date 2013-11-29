@@ -2,7 +2,7 @@
 
 length(t::Tuple) = tuplelen(t)
 endof(t::Tuple) = tuplelen(t)
-size(t::Tuple, d) = d==1 ? tuplelen(t) : error("invalid tuple dimension")
+size(t::Tuple, d) = d==1 ? tuplelen(t) : error("invalid tuple dimension $(d)")
 getindex(t::Tuple, i::Int) = tupleref(t, i)
 getindex(t::Tuple, i::Real) = tupleref(t, convert(Int, i))
 getindex(t::Tuple, r::AbstractArray) = tuple([t[ri] for ri in r]...)
@@ -19,6 +19,10 @@ next(t::Tuple, i::Int) = (t[i], i+1)
 indexed_next(t::Tuple, i::Int, state) = (t[i], i+1)
 indexed_next(a::Array, i::Int, state) = (a[i], i+1)
 indexed_next(I, i, state) = done(I,state) ? throw(BoundsError()) : next(I, state)
+
+# eltype
+
+eltype{T}(x::(T...)) = T
 
 ## mapping ##
 
@@ -108,26 +112,16 @@ reverse(x::Tuple) = (n=length(x); tuple([x[n-k+1] for k=1:n]...))
 
 ## specialized reduction ##
 
+# TODO: these definitions cannot yet be combined, since +(x...)
+# where x might be any tuple matches too many methods.
 sum(x::()) = 0
-sum(x::NTuple{1}) = x[1]
-sum(x::NTuple{2}) = x[1] + x[2]
-sum(x::NTuple{3}) = x[1] + x[2] + x[3]
-sum(x::NTuple{4}) = x[1] + x[2] + x[3] + x[4]
+sum(x::(Any, Any...)) = +(x...)
 
 prod(x::()) = 1
-prod(x::NTuple{1}) = x[1]
-prod(x::NTuple{2}) = x[1] * x[2]
-prod(x::NTuple{3}) = x[1] * x[2] * x[3]
-prod(x::NTuple{4}) = x[1] * x[2] * x[3] * x[4]
+prod(x::(Any, Any...)) = *(x...)
 
 all(x::()) = true
-all(x::NTuple{1,Bool}) = x[1]
-all(x::NTuple{2,Bool}) = x[1] & x[2]
-all(x::NTuple{3,Bool}) = x[1] & x[2] & x[3]
-all(x::NTuple{4,Bool}) = x[1] & x[2] & x[3] & x[4]
+all(x::(Any, Any...)) = (&)(x...)
 
 any(x::()) = false
-any(x::NTuple{1,Bool}) = x[1]
-any(x::NTuple{2,Bool}) = x[1] | x[2]
-any(x::NTuple{3,Bool}) = x[1] | x[2] | x[3]
-any(x::NTuple{4,Bool}) = x[1] | x[2] | x[3] | x[4]
+any(x::(Any, Any...)) = |(x...)

@@ -137,6 +137,8 @@ radians2degrees(z::Real) = oftype(z, 57.29577951308232*z)
 degrees2radians(z::Real) = oftype(z, 0.017453292519943295*z)
 radians2degrees(z::Integer) = radians2degrees(float(z))
 degrees2radians(z::Integer) = degrees2radians(float(z))
+@vectorize_1arg Real radians2degrees
+@vectorize_1arg Real degrees2radians
 
 for (finv, f) in ((:sec, :cos), (:csc, :sin), (:cot, :tan),
                   (:sech, :cosh), (:csch, :sinh), (:coth, :tanh),
@@ -228,7 +230,7 @@ for (fd, f) in ((:asind, :asin), (:acosd, :acos), (:atand, :atan),
     end
 end
 
-log(b,x) = log(x)/log(b)
+log(b,x) = log(x)./log(b)
 
 hypot(x::Real, y::Real) = hypot(promote(x,y)...)
 function hypot{T<:Real}(x::T, y::T)
@@ -739,7 +741,7 @@ function psifn(x::Float64, n::Int, kode::Int, m::Int)
 #-----------------------------------------------------------------------
     if abs(t) > elim
         if t <= 0.0 error("n too large") end
-        error("Overflow, x too small or n+m-1 too large or both")
+        error("overflow; x too small or n+m-1 too large or both")
     end
     if x < wdtol
         ans[1] = x^(-n - 1)
@@ -828,7 +830,7 @@ function psifn(x::Float64, n::Int, kode::Int, m::Int)
     t1 = xdmln + xdmln
     t2 = t + xdmln
     tk = max(abs(t), abs(t1), abs(t2))
-    if tk > elim error("Underflow") end
+    if tk > elim error("underflow") end
     tss = exp(-t)
     tt = 0.5/xdmy
     t1 = tt

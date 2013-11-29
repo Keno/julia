@@ -1,8 +1,8 @@
 module Entry
 
+import Base: thispatch, nextpatch, nextminor, nextmajor, check_new_version
+import ..Git, ..Reqs, ..Read, ..Query, ..Resolve, ..Cache, ..Write, ..GitHub
 using ..Types
-import ..Reqs, ..Read, ..Query, ..Resolve, ..Cache, ..Write
-import Base: Git, thispatch, nextpatch, nextminor, nextmajor, check_new_version
 
 macro recover(ex)
     quote
@@ -253,6 +253,30 @@ function update(branch::String)
     resolve(Reqs.parse("REQUIRE"), avail, instd, fixed, free)
 end
 
+function pull_request(dir::String, commit::String="", url::String="")
+    commit = isempty(commit) ? Git.head(dir=dir) :
+        Git.readchomp(`rev-parse --verify $commit`, dir=dir)
+    isempty(url) && (url = Git.readchomp(`config remote.origin.url`, dir=dir))
+    m = match(Git.GITHUB_REGEX, url)
+    m == nothing && error("not a GitHub repo URL, can't make a pull request: $url")
+    owner, repo = m.captures[2:3]
+    user = GitHub.user()
+    info("Forking $owner/$repo to $user")
+    response = GitHub.fork(owner,repo)
+    fork = response["ssh_url"]
+    branch = "pull-request/$(commit[1:8])"
+    info("Pushing changes as branch $branch")
+    Git.run(`push -q $fork $commit:refs/heads/$branch`, dir=dir)
+    pr_url = "$(response["html_url"])/compare/$branch?expand=1"
+    @osx? run(`open $pr_url`) : info("To create a pull-request open:\n\n  $pr_url\n")
+end
+
+function submit(pkg::String, commit::String="")
+    urlpath = joinpath("METADATA",pkg,"url")
+    url = ispath(urlpath) ? readchomp(urlpath) : ""
+    pull_request(pkg, commit, url)
+end
+
 function publish(branch::String)
     Git.branch(dir="METADATA") == branch ||
         error("METADATA must be on $branch to publish changes")
@@ -272,7 +296,7 @@ function publish(branch::String)
         sha1 = readchomp(joinpath("METADATA",path))
         if Git.success(`cat-file -e origin/$branch:$path`, dir="METADATA")
             old = Git.readchomp(`cat-file blob origin/$branch:$path`, dir="METADATA")
-            old == sha1 || error("$pkg v$ver SHA1 changed in METADATA – refusing to push")
+            old == sha1 || error("$pkg v$ver SHA1 changed in METADATA – refusing to publish")
         end
         any(split(Git.readall(`tag --contains $sha1`, dir=pkg))) do tag
             ver == convert(VersionNumber,tag) || return false
@@ -302,8 +326,8 @@ function publish(branch::String)
             end
         end
     end
-    info("Pushing METADATA changes")
-    Git.run(`push -q origin $branch`, dir="METADATA")
+    info("Submitting METADATA changes")
+    pull_request("METADATA")
 end
 
 function resolve(

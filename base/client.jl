@@ -46,6 +46,14 @@ end
 
 function repl_cmd(cmd)
     shell = shell_split(get(ENV,"JULIA_SHELL",get(ENV,"SHELL","/bin/sh")))
+    # Note that we can't support the fish shell due to its lack of subshells
+    #   See this for details: https://github.com/JuliaLang/julia/issues/4918
+    if Base.basename(shell[1]) == "fish"
+        warn_once("cannot use the fish shell, defaulting to /bin/sh\
+         set the JULIA_SHELL environment variable to silence this warning")
+        shell = "/bin/sh"
+    end
+
     if isempty(cmd.exec)
         error("no cmd to execute")
     elseif cmd.exec[1] == "cd"
@@ -59,7 +67,7 @@ function repl_cmd(cmd)
         end
         println(pwd())
     else
-        run(@windows? cmd : detach(`$shell -i -c "$(shell_escape(cmd))"`))
+        run(@windows? cmd : `$shell -i -c "($(shell_escape(cmd))) && true"`)
     end
     nothing
 end
@@ -283,7 +291,7 @@ function process_options(args::Array{Any,1})
                 color_set = true
                 global have_color = true
             elseif args[i][8] == '='
-                val = args[i][9:]
+                val = args[i][9:end]
                 if in(val, ("no","0","false"))
                     color_set = true
                     global have_color = false

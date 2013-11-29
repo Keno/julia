@@ -133,6 +133,20 @@ end
 @test_throws test4538_2(2)
 @test test4538_2(x=2) == 2
 
+# that, but in a module
+module Foo4538
+macro TEST()
+    quote
+        function $(esc(:test4538_foo_2))(;x=1)
+            return x
+        end
+    end
+end
+end
+@Foo4538.TEST()
+@test test4538_foo_2() == 1
+@test test4538_foo_2(x=2) == 2
+
 f4538_3(;x=1) = x
 macro TEST4538_3()
     quote
@@ -141,3 +155,9 @@ macro TEST4538_3()
     end
 end
 @test (@TEST4538_3) == 3
+
+# issue #4801
+type T4801{X}
+    T4801(;k=0) = new()
+end
+@test isa(T4801{Any}(k=0), T4801{Any})

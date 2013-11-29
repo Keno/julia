@@ -89,7 +89,7 @@ extern "C" {
 #include "julia.h"
 #include "builtin_proto.h"
 
-void * __stack_chk_guard = NULL;
+void *__stack_chk_guard = NULL;
 
 #if defined(_OS_WINDOWS_) && !defined(_COMPILER_MINGW_)
 void __stack_chk_fail()
@@ -547,7 +547,6 @@ typedef struct {
 #endif
     BasicBlock::iterator first_gcframe_inst;
     BasicBlock::iterator last_gcframe_inst;
-    Module *mod;
     std::vector<Instruction*> gc_frame_pops;
     std::vector<CallInst*> to_inline;
 } jl_codectx_t;
@@ -1960,13 +1959,14 @@ static Value *emit_checked_var(Value *bp, jl_sym_t *name, jl_codectx_t *ctx)
 
 static Value *ghostValue(jl_value_t *ty)
 {
-    if (jl_is_datatype(ty))
-    {
+    if (jl_is_datatype(ty)) {
         Type *llvmty = julia_struct_to_llvm(ty);
         assert(llvmty != T_void);
         return UndefValue::get(llvmty);
-    } else 
+    } 
+    else {
         return mark_julia_type(UndefValue::get(NoopType),ty);
+    }
 }
 
 static Value *emit_var(jl_sym_t *sym, jl_value_t *ty, jl_codectx_t *ctx, bool isboxed)
@@ -2468,7 +2468,16 @@ static Value *emit_expr(jl_value_t *expr, jl_codectx_t *ctx, bool isboxed,
             return literal_pointer_val((jl_value_t*)jl_nothing);
     }
     else if (head == copyast_sym) {
-        return builder.CreateCall(prepare_call(jlcopyast_func), emit_expr(args[0], ctx));
+        jl_value_t *arg = args[0];
+        if (jl_is_quotenode(arg)) {
+            jl_value_t *arg1 = jl_fieldref(arg,0);
+            if (!((jl_is_expr(arg1) && ((jl_expr_t*)arg1)->head!=null_sym) ||
+                  jl_typeis(arg1,jl_array_any_type) || jl_is_quotenode(arg1))) {
+                // elide call to jl_copy_ast when possible
+                return emit_expr(arg, ctx);
+            }
+        }
+        return builder.CreateCall(prepare_call(jlcopyast_func), emit_expr(arg, ctx));
     }
     else {
         if (!strcmp(head->name, "$"))
@@ -2511,7 +2520,9 @@ static bool store_unboxed_p(jl_sym_t *s, jl_codectx_t *ctx)
     return (ctx->linfo->inferred && jltupleisbits(jt,false) &&
             // don't unbox intrinsics, since inference depends on their having
             // stable addresses for table lookup.
-            jt != (jl_value_t*)jl_intrinsic_type && !vi.isCaptured);
+            jt != (jl_value_t*)jl_intrinsic_type && !vi.isCaptured &&
+            // don't unbox vararg tuples
+            s != ctx->vaName);
 }
 
 static Value *alloc_local(jl_sym_t *s, jl_codectx_t *ctx)
@@ -2519,20 +2530,18 @@ static Value *alloc_local(jl_sym_t *s, jl_codectx_t *ctx)
     jl_varinfo_t &vi = ctx->vars[s];
     jl_value_t *jt = vi.declType;
     Value *lv = NULL;
-    Type *vtype = NULL;
-    if(store_unboxed_p(s,ctx) && s != ctx->vaName)
-        vtype = julia_type_to_llvm(jt);
-    if (vtype != T_void)
-    {
-        if (vtype == NULL)
-            vtype = jl_pvalue_llvmt;
+    assert(store_unboxed_p(s,ctx));
+    Type *vtype = julia_type_to_llvm(jt);
+    if (vtype != T_void) {
         lv = builder.CreateAlloca(vtype, 0, s->name);
         if (vtype != jl_pvalue_llvmt)
             mark_julia_type(lv, jt);
         vi.isGhost = false;
         assert(lv != NULL);
-    } else
+    } 
+    else {
         vi.isGhost = true;
+    }
     vi.memvalue = lv;
     return lv;
 }
@@ -2598,7 +2607,7 @@ static void allocate_gc_frame(size_t n_roots, jl_codectx_t *ctx)
 
 static void finalize_gc_frame(jl_codectx_t *ctx)
 {
-        if (ctx->argSpaceOffs + ctx->maxDepth == 0) {
+    if (ctx->argSpaceOffs + ctx->maxDepth == 0) {
         // 0 roots; remove gc frame entirely
         // replace instruction uses with Undef first to avoid LLVM assertion failures
         BasicBlock::iterator bbi = ctx->first_gcframe_inst;
@@ -2706,11 +2715,10 @@ static Function *gen_jlcall_wrapper(jl_lambda_info_t *lam, jl_expr_t *ast, Funct
             if (lty == T_void)
                 continue;
             theNewArg = emit_unbox(lty, theArg, ty);
-        } else if(jl_is_tuple(ty))
-        {
+        } 
+        else if(jl_is_tuple(ty)) {
             Type *lty = julia_struct_to_llvm(ty);
-            if (lty != jl_pvalue_llvmt)
-            {
+            if (lty != jl_pvalue_llvmt) {
                 if (lty == T_void)
                     continue;
                 theNewArg = emit_unbox(lty, theArg, ty);
@@ -2890,8 +2898,9 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
         std::vector<Type*> fsig(0);
         for(size_t i=0; i < jl_tuple_len(lam->specTypes); i++) {
             Type *ty = julia_type_to_llvm(jl_tupleref(lam->specTypes,i));
-            if (ty != T_void)
+            if (ty != T_void) {
                 fsig.push_back(ty);
+            }
             else {
                 ctx.vars[jl_decl_var(jl_cellref(largs,i))].isGhost = true;
             }
@@ -3178,7 +3187,8 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
         if (lv == NULL) {
             if (ctx.vars[s].isGhost) {
                 ctx.vars[s].passedAs = NULL;
-            } else {
+            } 
+            else {
                 // if this argument hasn't been given space yet, we've decided
                 // to leave it in the input argument array.
                 ctx.vars[s].passedAs = theArg;
@@ -3234,7 +3244,8 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
                     builder.CreateStore(builder.CreateCall(prepare_call(jlbox_func), restTuple), lv);
                 else
                     builder.CreateStore(restTuple, lv);
-            } else {
+            } 
+            else {
                 // TODO: Perhaps allow this in the future, but for now sice varargs are always unspecialized
                 // we don't
                 assert(false);
@@ -3791,8 +3802,8 @@ extern "C" void jl_init_codegen(void)
     jl_jit_events = new JuliaJITEventListener();
     jl_ExecutionEngine->RegisterJITEventListener(jl_jit_events);
 #if LLVM_USE_INTEL_JITEVENTS
-    if( const char* jit_profiling = std::getenv("ENABLE_JITPROFILING") )
-        if( std::atoi(jit_profiling) )
+    if (const char* jit_profiling = std::getenv("ENABLE_JITPROFILING"))
+        if (std::atoi(jit_profiling))
             jl_ExecutionEngine->RegisterJITEventListener(
                 JITEventListener::createIntelJITEventListener());
 #endif // LLVM_USE_INTEL_JITEVENTS
