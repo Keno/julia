@@ -632,6 +632,9 @@ static Value *emit_tupleset(Value *tuple, Value *i, Value *x, jl_value_t *jt, jl
     #ifdef OVERLAP_TUPLE_LEN
         Value *slot = builder.CreateGEP(builder.CreateBitCast(tuple, jl_ppvalue_llvmt),
                                  i);
+    #else 
+        Value *slot = builder.CreateGEP(builder.CreateBitCast(tuple, jl_ppvalue_llvmt),
+                                 builder.CreateAdd(ConstantInt::get(T_size,1),i));
     #endif
         builder.CreateStore(x,slot);
         return tuple;

@@ -26,7 +26,7 @@ LIBS += -lpthread
 endif
 
 DEBUGFLAGS += $(FLAGS)
-SHIPFLAGS += $(FLAGS)
+SHIPFLAGS += $(FLAGS) -ggdb -O0
 
 default: release
 
