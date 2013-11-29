@@ -114,6 +114,7 @@ static IRBuilder<> builder(getGlobalContext());
 static bool nested_compile=false;
 #define jl_Module (builder.GetInsertBlock()->getParent()->getParent())
 static ExecutionEngine *jl_ExecutionEngine;
+static RTDyldMemoryManager *jl_mcjmm;
 static std::map<int, std::string> argNumberStrings;
 static FunctionPassManager *FPM;
 
@@ -3775,11 +3776,13 @@ extern "C" void jl_init_codegen(void)
     // Temporarily disable Haswell BMI2 features due to LLVM bug.
     const char *mattr[] = {"-bmi2", "-avx2"};
     std::vector<std::string> attrvec (mattr, mattr+2);
+    jl_mcjmm = new SectionMemoryManager();
     jl_ExecutionEngine = EngineBuilder(dummy_module)
         .setEngineKind(EngineKind::JIT)
         .setTargetOptions(options)
         .setMAttrs(attrvec)
         .setUseMCJIT(true)
+        .setMCJITMemoryManager(jl_mcjmm)
         .create();
 #endif // LLVM VERSION
 

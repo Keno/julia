@@ -37,6 +37,8 @@ static clang::CodeGen::CodeGenTypes *clang_cgt;
 static clang::CodeGen::CodeGenFunction *clang_cgf;
 static DataLayout *TD;
 
+static llvm::Module *shadow_module;
+
 // clang types
 static clang::CanQualType cT_int1;
 static clang::CanQualType cT_int8;
@@ -126,7 +128,7 @@ DLLEXPORT void init_header(char *name)
     opts.UseStandardCXXIncludes = 1;
     pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory("/usr/include/c++/4.8"),clang::SrcMgr::C_System,false),true);
     pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory("/usr/include/x86_64-linux-gnu/c++/4.8/"),clang::SrcMgr::C_System,false),true);
-    pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory("/home/kfischer/julia/usr/lib/clang/3.3/include/"),clang::SrcMgr::C_System,false),true);
+    pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory("/home/kfischer/julia/usr/lib/clang/3.5/include/"),clang::SrcMgr::C_System,false),true);
     #define DIR(X) pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory(X),clang::SrcMgr::C_User,false),false);
     DIR("/home/kfischer/julia/src/support")
     DIR("/home/kfischer/julia/usr/include")
@@ -158,10 +160,19 @@ DLLEXPORT void init_julia_clang_env(void *module) {
     clang_compiler->createSourceManager(clang_compiler->getFileManager());
     clang_compiler->createPreprocessor();
     clang_compiler->createASTContext();
+    shadow_module = new llvm::Module("clangShadow",((llvm::Module*)module)->getContext());
     clang_astcontext = &clang_compiler->getASTContext();
     clang_compiler->setASTConsumer(new JuliaCodeGenerator());
     clang_compiler->createSema(clang::TU_Prefix,NULL);
     TD = new DataLayout(tin->getTargetDescription());
+    clang_cgm = new clang::CodeGen::CodeGenModule(
+        *clang_astcontext,
+        clang_compiler->getCodeGenOpts(),
+        *shadow_module,
+        *TD,
+        clang_compiler->getDiagnostics());
+    clang_cgt = new clang::CodeGen::CodeGenTypes(*clang_cgm);
+    clang_cgf = new clang::CodeGen::CodeGenFunction(*clang_cgm);
     
     cT_int1  = clang_astcontext->BoolTy;
     cT_int8  = clang_astcontext->SignedCharTy;
@@ -191,21 +202,15 @@ DLLEXPORT void init_julia_clang_env(void *module) {
     cT_pvoid = clang_astcontext->getPointerType(cT_void);
 }
 
+static llvm::Module *cur_module = NULL;
+
+
+
 DLLEXPORT void *setup_cpp_env(void *module, void *jlfunc)
 {
-    // This sucks. We have to do this because MCJIT requires us to have a new module every time.
-    // When we change the way Julia handles llvm modules, this also needs to change. For now
-    // this is fine as long as we don't compile too much C code, but I'm still not very happy with this.
-    clang_cgm = new clang::CodeGen::CodeGenModule(
-            *clang_astcontext,
-            clang_compiler->getCodeGenOpts(),
-            *((llvm::Module*)module),
-            *TD,
-            clang_compiler->getDiagnostics());
-    clang_cgt = new clang::CodeGen::CodeGenTypes(*clang_cgm);
-    clang_cgf = new clang::CodeGen::CodeGenFunction(*clang_cgm);
-
     llvm::Function *w = (Function *)jlfunc;
+
+    cur_module = (llvm::Module*)module;
 
     BasicBlock &b0 = w->getEntryBlock();
 
@@ -228,6 +233,98 @@ DLLEXPORT void *setup_cpp_env(void *module, void *jlfunc)
     return alloca_bb_ptr;
 }
 
+class FunctionMover;
+std::deque<llvm::CallInst*> CallSitesToFix;
+
+static Function *myCloneFunction(llvm::Function *toClone,FunctionMover *mover);
+
+class FunctionMover : public ValueMaterializer
+{
+public:
+    ValueToValueMapTy VMap;
+    virtual Value *materializeValueFor (Value *V)
+    {
+        Function *F = dyn_cast<Function>(V);
+        if(F)
+        {
+            if(F->isIntrinsic())
+                return cur_module->getOrInsertFunction(F->getName(),F->getFunctionType());
+            if(F->isDeclaration() || F->getParent() != cur_module)
+            {
+                Function *shadow = shadow_module->getFunction(F->getName());
+                if (shadow != NULL && !shadow->isDeclaration())
+                {
+                    // Not truly external
+                    // Check whether we already emitted it once
+                    uint64_t addr = jl_mcjmm->getSymbolAddress(F->getName());
+                    if(addr == 0)
+                    {
+                        return myCloneFunction(shadow,this);
+                    } else {
+                        return cur_module->getOrInsertFunction(F->getName(),F->getFunctionType());
+                    }
+                } else if (!F->isDeclaration())
+                {
+                    return myCloneFunction(F,this);
+                }
+            }
+            // Still a declaration and still in a diffrent module
+            if(F->isDeclaration() && F->getParent() != cur_module)
+            {
+                // Create forward declaration in current module
+                return cur_module->getOrInsertFunction(F->getName(),F->getFunctionType());
+            }
+        } else if (isa<GlobalVariable>(V))
+        {
+            GlobalVariable *GV = cast<GlobalVariable>(V);
+            assert(GV != NULL);
+            GlobalVariable *newGV = new GlobalVariable(*cur_module,
+                GV->getType()->getElementType(),
+                GV->isConstant(),
+                GlobalVariable::ExternalLinkage,
+                NULL,
+                GV->getName());
+            newGV->copyAttributesFrom(GV);
+            if (GV->isDeclaration())
+                return newGV;
+            uint64_t addr = jl_mcjmm->getSymbolAddress(GV->getName());
+            if(addr != 0)
+            {
+                newGV->setExternallyInitialized(true);
+                return newGV;
+            }
+            if(GV->getInitializer() != NULL) {
+                Value *C = MapValue(GV->getInitializer(),VMap,RF_None,NULL,this);
+                newGV->setInitializer(cast<Constant>(C));
+            }
+            return newGV;
+        }
+        return NULL;
+    };
+};
+
+static Function *myCloneFunction(llvm::Function *toClone,FunctionMover *mover)
+{
+    Function *NewF = Function::Create(toClone->getFunctionType(),
+        Function::ExternalLinkage,
+        toClone->getName(),
+        cur_module);    
+    ClonedCodeInfo info;
+    Function::arg_iterator DestI = NewF->arg_begin();
+    for (Function::const_arg_iterator I = toClone->arg_begin(), E = toClone->arg_end();
+      I != E; ++I)
+    if (mover->VMap.count(I) == 0) {   // Is this argument preserved?
+        DestI->setName(I->getName()); // Copy the name over...
+         mover->VMap[I] = DestI++;        // Add mapping to VMap
+    }
+
+    SmallVector<ReturnInst*, 8> Returns;
+    llvm::CloneFunctionInto(NewF,toClone,mover->VMap,true,Returns,"",NULL,NULL,mover);
+
+    return NewF;
+}
+
+
 DLLEXPORT void cleanup_cpp_env(void *alloca_bb_ptr)
 {
     clang_compiler->getSema().PerformPendingInstantiations(false);
@@ -239,16 +336,20 @@ DLLEXPORT void cleanup_cpp_env(void *alloca_bb_ptr)
         I->setLinkage(llvm::GlobalVariable::ExternalLinkage);
     }
 
-    jl_Module->dump();
+    FunctionMover mover;
+
+    for (std::deque<llvm::CallInst*>::iterator it = CallSitesToFix.begin(); it != CallSitesToFix.end(); ++it) 
+    {
+        llvm::CallInst *call = (*it);
+        assert(call != NULL);
+        // MAGIC
+        llvm::RemapInstruction(call,mover.VMap,RF_IgnoreMissingEntries,NULL,&mover);
+    }
 
     // cleanup the environment
     clang_cgf->AllocaInsertPt = 0; // free this ptr reference
     if (alloca_bb_ptr)
         ((llvm::Instruction *)alloca_bb_ptr)->eraseFromParent();
-
-    free(clang_cgm);
-    free(clang_cgt);
-    free(clang_cgf);
 }
 
 DLLEXPORT void emit_cpp_new(void *type)
@@ -485,6 +586,7 @@ DLLEXPORT Value *emit_cpp_call(void *cppfunc, Value **args, size_t nargs, bool F
     llvm::FunctionType *Ty = clang_cgm->getTypes().GetFunctionType(cgfi);
     clang::CodeGen::RValue rv;
     sema.MarkFunctionReferenced(clang::SourceLocation(),fdecl);
+    llvm::Instruction *call;
     if(isa<clang::CXXMethodDecl>(fdecl))
     {
         clang::CXXMethodDecl *cxx = dyn_cast<clang::CXXMethodDecl>(fdecl);
@@ -495,15 +597,18 @@ DLLEXPORT Value *emit_cpp_call(void *cppfunc, Value **args, size_t nargs, bool F
 
         rv = clang_cgf->EmitCall(
             cgfi, clang_cgm->GetAddrOfFunction(cxx,Ty), return_slot,
-            argvals, NULL, NULL);
+            argvals, NULL, &call);
 
     } else {
-
         rv = clang_cgf->EmitCall(
             cgfi, clang_cgf->EmitScalarExpr(ICE), return_slot,
-            argvals, NULL, NULL);
-   
+            argvals, NULL, &call);
     }
+
+    CallInst *inst = dyn_cast<CallInst>(call);
+    assert(inst != NULL);
+    CallSitesToFix.push_back(inst);
+
 
     assert(rv.isScalar());
     Value *ret = rv.getScalarVal();
