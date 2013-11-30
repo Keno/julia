@@ -646,7 +646,7 @@ static Value *emit_llvmcall(jl_value_t **args, size_t nargs, jl_codectx_t *ctx)
                           int argn, jl_codectx_t *ctx,
                           bool *mightNeedTempSpace) */
         bool mightNeedTempSpace = false;
-        argvals[i] = julia_to_native(t,tti,arg,argi,false,i,ctx,&mightNeedTempSpace);
+        argvals[i] = julia_to_native(t,tti,arg,argi,false,i,ctx,&mightNeedTempSpace,&mightNeedTempSpace);
     }
 
     Function *f;
@@ -753,6 +753,11 @@ static Value *emit_llvmcall(jl_value_t **args, size_t nargs, jl_codectx_t *ctx)
     ctx->to_inline.push_back(inst);
 
     JL_GC_POP();
+
+    if(inst->getType() != rettype)
+    {
+        jl_error("Return type of llvmcall'ed function does not match declared return type");
+    }
 
     return mark_julia_type(inst,rtt);
 }

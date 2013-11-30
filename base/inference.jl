@@ -119,11 +119,26 @@ t_func[eval(Core.Intrinsics,:llvmcall)] =
     fptr, rt, at = args
     if is(rt,Type{Void}) 
         Nothing
-    elseif isType(rtt)
+    elseif Base.isType(rtt)
         rtt.parameters[1]
-    elseif isa(rt,Tuple) && isa(rt[1],Function)
-        return rt[1](rt[2:end]...,a...)
-    elseif isa(rtt,Type) && isa(rtt,Tuple)
+    elseif isa(rtt,Tuple) && is(rtt[1],Function)
+        if isa(rt,Expr)
+            if rt.head == :call
+                if isa(rt.args[1],Expr) && rt.args[1].head == :call &&
+                    rt.args[1].args[1] == :top && rt.args[1].args[2] == :tuple
+                    rt = rt.args[2:end]
+                end
+            elseif rt.head == :call1 
+                if isa(rt.args[1],TopNode) && rt.args[1].name == :tuple
+                    rt = rt.args[2:end]
+                end
+            end
+        end
+        if (isa(rt,Tuple) || isa(rt,Array)) && isa(rt[1],Function)
+            return rt[1](a,rt[2:end]...)
+        end
+    end
+    if isa(rt,Type) && isa(rt,Tuple)
         return rtt
     else
         return Any

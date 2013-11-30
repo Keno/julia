@@ -203,38 +203,44 @@ DLLEXPORT void init_julia_clang_env(void *module) {
 }
 
 static llvm::Module *cur_module = NULL;
-
+static llvm::Function *cur_func = NULL;
 
 
 DLLEXPORT void *setup_cpp_env(void *module, void *jlfunc)
 {
     llvm::Function *w = (Function *)jlfunc;
-
+    assert(w != NULL);
+    assert(clang_cgf != NULL);
     cur_module = (llvm::Module*)module;
+    cur_func = w;
 
-    BasicBlock &b0 = w->getEntryBlock();
+    Function *ShadowF = Function::Create(w->getFunctionType(),
+        Function::ExternalLinkage,
+        w->getName(),
+        shadow_module);    
+
+    BasicBlock *b0 = BasicBlock::Create(cur_module->getContext(), "top", ShadowF);
 
     // setup the environment to clang's expecations
-    clang_cgf->Builder.SetInsertPoint( &b0 );
+    clang_cgf->Builder.SetInsertPoint( b0 );
     // clang expects to alloca memory before the AllocaInsertPt
     // typically, clang would create this pointer when it started emitting the function
     // instead, we create a dummy reference here
     // for efficiency, we avoid creating a new placehold instruction if possible
-    BasicBlock* alloca_bb = &b0;
     llvm::Instruction *alloca_bb_ptr = NULL;
-    if (alloca_bb->empty()) {
+    if (b0->empty()) {
         llvm::Value *Undef = llvm::UndefValue::get(T_int32);
-        clang_cgf->AllocaInsertPt = alloca_bb_ptr = new llvm::BitCastInst(Undef, T_int32, "", alloca_bb);
-    } else
-        clang_cgf->AllocaInsertPt = &alloca_bb->front();
+        clang_cgf->AllocaInsertPt = alloca_bb_ptr = new llvm::BitCastInst(Undef, T_int32, "", b0);
+    } else {
+        clang_cgf->AllocaInsertPt = &(b0->front());
+    }
 
-    clang_cgf->CurFn = w;
+    clang_cgf->CurFn = ShadowF;
 
     return alloca_bb_ptr;
 }
 
 class FunctionMover;
-std::deque<llvm::CallInst*> CallSitesToFix;
 
 static Function *myCloneFunction(llvm::Function *toClone,FunctionMover *mover);
 
@@ -312,11 +318,15 @@ static Function *myCloneFunction(llvm::Function *toClone,FunctionMover *mover)
     ClonedCodeInfo info;
     Function::arg_iterator DestI = NewF->arg_begin();
     for (Function::const_arg_iterator I = toClone->arg_begin(), E = toClone->arg_end();
-      I != E; ++I)
-    if (mover->VMap.count(I) == 0) {   // Is this argument preserved?
-        DestI->setName(I->getName()); // Copy the name over...
-         mover->VMap[I] = DestI++;        // Add mapping to VMap
+      I != E; ++I) {
+        //if (mover->VMap.count(I) == 0) {   // Is this argument preserved?
+            DestI->setName(I->getName()); // Copy the name over...
+            mover->VMap[I] = DestI++;        // Add mapping to VMap
+        //}
     }
+
+    // Necessary in case the function is self referential
+    mover->VMap[toClone] = NewF;
 
     SmallVector<ReturnInst*, 8> Returns;
     llvm::CloneFunctionInto(NewF,toClone,mover->VMap,true,Returns,"",NULL,NULL,mover);
@@ -336,20 +346,28 @@ DLLEXPORT void cleanup_cpp_env(void *alloca_bb_ptr)
         I->setLinkage(llvm::GlobalVariable::ExternalLinkage);
     }
 
-    FunctionMover mover;
-
-    for (std::deque<llvm::CallInst*>::iterator it = CallSitesToFix.begin(); it != CallSitesToFix.end(); ++it) 
-    {
-        llvm::CallInst *call = (*it);
-        assert(call != NULL);
-        // MAGIC
-        llvm::RemapInstruction(call,mover.VMap,RF_IgnoreMissingEntries,NULL,&mover);
-    }
+    Function *F = clang_cgf->CurFn;
 
     // cleanup the environment
     clang_cgf->AllocaInsertPt = 0; // free this ptr reference
     if (alloca_bb_ptr)
-        ((llvm::Instruction *)alloca_bb_ptr)->eraseFromParent();
+        ((llvm::Instruction *)alloca_bb_ptr)->eraseFromParent(); 
+
+    FunctionMover mover;
+    Function::arg_iterator DestI = cur_func->arg_begin();
+    for (Function::const_arg_iterator I = F->arg_begin(), E = F->arg_end();
+      I != E; ++I) {
+        //if (mover->VMap.count(I) == 0) {   // Is this argument preserved?
+            mover.VMap[I] = DestI++;        // Add mapping to VMap
+        //}
+    }
+
+    cur_func->deleteBody();
+
+    SmallVector<ReturnInst*, 8> Returns;
+    llvm::CloneFunctionInto(cur_func,F,mover.VMap,true,Returns,"",NULL,NULL,&mover);
+
+    F->eraseFromParent();
 }
 
 DLLEXPORT void emit_cpp_new(void *type)
@@ -586,7 +604,6 @@ DLLEXPORT Value *emit_cpp_call(void *cppfunc, Value **args, size_t nargs, bool F
     llvm::FunctionType *Ty = clang_cgm->getTypes().GetFunctionType(cgfi);
     clang::CodeGen::RValue rv;
     sema.MarkFunctionReferenced(clang::SourceLocation(),fdecl);
-    llvm::Instruction *call;
     if(isa<clang::CXXMethodDecl>(fdecl))
     {
         clang::CXXMethodDecl *cxx = dyn_cast<clang::CXXMethodDecl>(fdecl);
@@ -597,18 +614,13 @@ DLLEXPORT Value *emit_cpp_call(void *cppfunc, Value **args, size_t nargs, bool F
 
         rv = clang_cgf->EmitCall(
             cgfi, clang_cgm->GetAddrOfFunction(cxx,Ty), return_slot,
-            argvals, NULL, &call);
+            argvals, NULL, NULL);
 
     } else {
         rv = clang_cgf->EmitCall(
             cgfi, clang_cgf->EmitScalarExpr(ICE), return_slot,
-            argvals, NULL, &call);
+            argvals, NULL, NULL);
     }
-
-    CallInst *inst = dyn_cast<CallInst>(call);
-    assert(inst != NULL);
-    CallSitesToFix.push_back(inst);
-
 
     assert(rv.isScalar());
     Value *ret = rv.getScalarVal();
@@ -661,6 +673,11 @@ DLLEXPORT void *clang_get_cgt()
 DLLEXPORT void *clang_get_builder()
 {
     return (void*)&clang_cgf->Builder;
+}
+
+DLLEXPORT void *jl_get_llvm_ee()
+{
+    return jl_ExecutionEngine;
 }
 
 DLLEXPORT void cdump(void *decl)

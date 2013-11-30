@@ -705,6 +705,7 @@ static Value *emit_tupleref(Value *tuple, Value *ival, jl_value_t *jt, jl_codect
         }
         ConstantInt *idx = dyn_cast<ConstantInt>(ival);
         if (idx != 0) {
+            assert(ty->isStructTy() || ty->isArrayTy());  
             unsigned ci = (unsigned)idx->getZExtValue()-1;
             size_t n = jl_tuple_len(jt);
             for (size_t i = 0,j = 0; i<n; ++i) {
