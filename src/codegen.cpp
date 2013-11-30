@@ -902,8 +902,10 @@ static bool is_getfield_nonallocating(jl_datatype_t *ty, jl_value_t *fld)
     return true;
 }
 
-static bool jltupleisbits(jl_value_t *jt, bool allow_unsized = true)
+DLLEXPORT int jl_tupleisbits(jl_value_t *jt, int allow_unsized)
 {
+    if (jt == NULL)
+        return false;
     if (!jl_is_tuple(jt))
         return jl_isbits(jt) && (allow_unsized || 
             ((jl_is_bitstype(jt) && jl_datatype_size(jt) > 0) || 
@@ -912,7 +914,7 @@ static bool jltupleisbits(jl_value_t *jt, bool allow_unsized = true)
     if (ntypes == 0)
         return allow_unsized;
     for (size_t i = 0; i < ntypes; ++i)
-        if (!jltupleisbits(jl_tupleref(jt,i),allow_unsized))
+        if (!jl_tupleisbits(jl_tupleref(jt,i),allow_unsized))
             return false;
     return true; 
 }
@@ -921,7 +923,7 @@ static bool jl_tupleref_nonallocating(jl_value_t *ty, jl_value_t *idx)
 {
     if (!jl_is_tuple(ty))
         return false;
-    if (jltupleisbits(ty))
+    if (jl_tupleisbits(ty,true))
         return false;
     return true;
 }
@@ -2517,7 +2519,7 @@ static bool store_unboxed_p(jl_sym_t *s, jl_codectx_t *ctx)
     jl_value_t *jt = vi.declType;
     // only store a variable unboxed if type inference has run, which
     // checks that the variable is not referenced undefined.
-    return (ctx->linfo->inferred && jltupleisbits(jt,false) &&
+    return (ctx->linfo->inferred && jl_tupleisbits(jt,false) &&
             // don't unbox intrinsics, since inference depends on their having
             // stable addresses for table lookup.
             jt != (jl_value_t*)jl_intrinsic_type && !vi.isCaptured &&
@@ -2874,14 +2876,14 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
             // no captured vars and not vararg
             // consider specialized signature
             for(size_t i=0; i < jl_tuple_len(lam->specTypes); i++) {
-                if (jltupleisbits(jl_tupleref(lam->specTypes, i))) {
+                if (jl_tupleisbits(jl_tupleref(lam->specTypes, i),true)) {
                     specsig = true;
                     break;
                 }
             }
             if (jl_tuple_len(lam->specTypes) == 0)
                 specsig = true;
-            if (jltupleisbits(jlrettype))
+            if (jl_tupleisbits(jlrettype,true))
                 specsig = true;
         }
     }

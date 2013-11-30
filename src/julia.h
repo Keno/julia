@@ -592,10 +592,12 @@ STATIC_INLINE int jl_is_structtype(void *v)
             !((jl_datatype_t*)(v))->abstract);
 }
 
+DLLEXPORT int jl_tupleisbits(jl_value_t *jt, int allow_unsized);
+
 STATIC_INLINE int jl_isbits(void *t)   // corresponding to isbits() in julia
 {
     return (jl_is_datatype(t) && !((jl_datatype_t*)t)->mutabl &&
-            ((jl_datatype_t*)t)->pointerfree && !((jl_datatype_t*)t)->abstract);
+            ((jl_datatype_t*)t)->pointerfree && !((jl_datatype_t*)t)->abstract) || (jl_is_tuple(t) && jl_tupleisbits((jl_value_t*)t,1));
 }
 
 STATIC_INLINE int jl_is_abstracttype(void *v)

@@ -217,7 +217,12 @@ static Value *emit_unbox(Type *to, Value *x, jl_value_t *jt)
         (to->isStructTy() && dyn_cast<StructType>(to)->isLiteral()) )
     {
         assert(jt != 0);
-        assert(jl_is_tuple(jt));
+        if(!jl_is_tuple(jt))
+        {
+            x->dump();
+            to->dump();
+            jl_(jt);
+        }
         assert(to != T_void);
         Value *tpl = UndefValue::get(to);
         for (size_t i = 0; i < jl_tuple_len(jt); ++i) {
@@ -225,7 +230,7 @@ static Value *emit_unbox(Type *to, Value *x, jl_value_t *jt)
             if(ety == T_void)
                 continue;
             Value *ref = emit_tupleref(x,ConstantInt::get(T_size,i+1),jt,NULL);
-            Value *elt = emit_unbox(ety,ref,julia_type_of(ref));
+            Value *elt = emit_unbox(ety,ref,jl_tupleref(jt,i));
             tpl = emit_tupleset(tpl,ConstantInt::get(T_size,i+1),elt,jt,NULL);
         }
         return tpl;

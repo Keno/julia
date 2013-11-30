@@ -91,8 +91,9 @@ static Type *julia_type_to_llvm(jl_value_t *jt)
                 Type *ret = NULL;
                 if(type == T_void)
                     return T_void;
-                if (type->isSingleValueType())
+                if (type->isSingleValueType() && !type->isVectorTy()) {
                     ret = VectorType::get(type,ntypes);
+                }
                 else
                     ret = ArrayType::get(type,ntypes);
                 return ret;

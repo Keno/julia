@@ -8,6 +8,8 @@ getindex(t::Tuple, i::Real) = tupleref(t, convert(Int, i))
 getindex(t::Tuple, r::AbstractArray) = tuple([t[ri] for ri in r]...)
 getindex(t::Tuple, b::AbstractArray{Bool}) = getindex(t,find(b))
 
+isbits(t::Tuple) = (for x in t; if !isbits(x); return false; end; end; return true)
+
 ## iterating ##
 
 start(t::Tuple) = 1
