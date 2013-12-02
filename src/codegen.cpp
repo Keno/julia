@@ -152,6 +152,10 @@ static Type *T_float64;
 static Type *T_pfloat64;
 static Type *T_void;
 
+// Basic DITypes
+static DICompositeType jl_value_dillvmt;
+static DIDerivedType jl_pvalue_dillvmt;
+
 // constants
 static Value *V_null;
 
@@ -313,7 +317,7 @@ static Function *to_function(jl_lambda_info_t *li, bool cstyle)
     //ios_printf(ios_stderr, "%s:%d\n",
     //           ((jl_sym_t*)li->file)->name, li->line);
     //f->dump();
-    //verifyFunction(*f);
+    verifyFunction(*f);
     if (old != NULL) {
         builder.SetInsertPoint(old);
         builder.SetCurrentDebugLocation(olddl);
@@ -481,6 +485,7 @@ struct jl_varinfo_t {
     Value *memvalue;  // an address, if the var is alloca'd
     Value *SAvalue;   // register, if the var is SSA
     Value *passedAs;  // if an argument, the original passed value
+    DIVariable dinfo;
     int closureidx;   // index in closure env, or -1
     bool isAssigned;
     bool isCaptured;
@@ -495,10 +500,10 @@ struct jl_varinfo_t {
     jl_value_t *declType;
     jl_value_t *initExpr;  // initializing expression for SSA variables
 
-    jl_varinfo_t() : memvalue(NULL), SAvalue(NULL), passedAs(NULL), closureidx(-1),
-                     isAssigned(true), isCaptured(false), isSA(false), isVolatile(false),
-                     isArgument(false), isGhost(false), hasGCRoot(false), escapes(true), 
-                     usedUndef(false), used(false), 
+    jl_varinfo_t() : memvalue(NULL), SAvalue(NULL), passedAs(NULL), dinfo(DIVariable()),
+                     closureidx(-1), isAssigned(true), isCaptured(false), isSA(false), 
+                     isVolatile(false), isArgument(false), isGhost(false), hasGCRoot(false), 
+                     escapes(true), usedUndef(false), used(false), 
                      declType((jl_value_t*)jl_any_type), initExpr(NULL)
     {
     }
@@ -547,6 +552,7 @@ typedef struct {
 #endif
     BasicBlock::iterator first_gcframe_inst;
     BasicBlock::iterator last_gcframe_inst;
+    llvm::DIBuilder *dbuilder;
     std::vector<Instruction*> gc_frame_pops;
     std::vector<CallInst*> to_inline;
 } jl_codectx_t;
@@ -2042,8 +2048,11 @@ static void emit_assignment(jl_value_t *l, jl_value_t *r, jl_codectx_t *ctx)
     if (bnd) {
         rval = boxed(emit_expr(r, ctx, true),ctx);
         builder.CreateCall2(prepare_call(jlcheckassign_func),
-                            literal_pointer_val((void*)bnd),
-                            rval);
+                    literal_pointer_val((void*)bnd),
+                    rval);
+        if (!is_global(s,ctx) && ((llvm::MDNode*)ctx->vars[s].dinfo) != NULL) {  //TODO: Fixme
+            ctx->dbuilder->insertDbgValueIntrinsic(rval,0,ctx->vars[s].dinfo,builder.GetInsertBlock());
+        }
     }
     else {
         jl_varinfo_t &vi = ctx->vars[s];
@@ -2064,6 +2073,9 @@ static void emit_assignment(jl_value_t *l, jl_value_t *r, jl_codectx_t *ctx)
             }
             else {
                 rval = boxed(emit_expr(r, ctx, true),ctx,rt);
+                if (!is_global(s,ctx) && ((llvm::MDNode*)vi.dinfo) != NULL) {
+                    ctx->dbuilder->insertDbgValueIntrinsic(rval,0,vi.dinfo,builder.GetInsertBlock());
+                }
             }
             if (builder.GetInsertBlock()->getTerminator() == NULL) {
                 builder.CreateStore(rval, bp, vi.isVolatile);
@@ -2088,6 +2100,9 @@ static void emit_assignment(jl_value_t *l, jl_value_t *r, jl_codectx_t *ctx)
             ((bp == NULL) ||
              (!vi.isCaptured && !vi.isArgument && !vi.usedUndef &&
               !vi.isVolatile && rval->getType() == jl_pvalue_llvmt))) {
+            if (!is_global(s,ctx) && ((llvm::MDNode*)vi.dinfo) != NULL) {
+                ctx->dbuilder->insertDbgValueIntrinsic(rval,0,vi.dinfo,builder.GetInsertBlock());
+            }
             // use SSA value instead of GC frame load for var access
             vi.SAvalue = rval;
         }
@@ -2540,6 +2555,7 @@ static Value *alloc_local(jl_sym_t *s, jl_codectx_t *ctx)
             mark_julia_type(lv, jt);
         vi.isGhost = false;
         assert(lv != NULL);
+        ctx->dbuilder->insertDeclare(lv,vi.dinfo,builder.GetInsertBlock());
     } 
     else {
         vi.isGhost = true;
@@ -2801,6 +2817,7 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
         jl_sym_t *argname = jl_decl_var(jl_cellref(largs,i));
         jl_varinfo_t &varinfo = ctx.vars[argname];
         varinfo.isArgument = true;
+
     }
     if (va) {
         ctx.vars[ctx.vaName].isArgument = true;
@@ -2867,6 +2884,14 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
     jl_value_t *jlrettype = jl_ast_rettype(lam, (jl_value_t*)ast);
     Function *f = NULL;
 
+    std::stringstream funcName;
+    funcName << "julia_" << lam->name->name;
+
+    Module *mod = new Module(funcName.str(), jl_LLVMContext);
+    jl_ExecutionEngine->addModule(mod);
+
+    funcName << globalUnique++;
+
     bool specsig = false;
     if (cstyle && !va && !hasCapt) {
         specsig = true;
@@ -2887,14 +2912,6 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
                 specsig = true;
         }
     }
-
-    std::stringstream funcName;
-    funcName << "julia_" << lam->name->name;
-
-    Module *mod = new Module(funcName.str(), jl_LLVMContext);
-    jl_ExecutionEngine->addModule(mod);
-
-    funcName << globalUnique++;
 
     if (specsig) {
         std::vector<Type*> fsig(0);
@@ -2926,7 +2943,6 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
         }
     }
 
-    DIBuilder dbuilder(*mod);
     //TODO: this seems to cause problems, but should be made to work eventually
     //if (jlrettype == (jl_value_t*)jl_bottom_type)
     //    f->setDoesNotReturn();
@@ -2939,7 +2955,12 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
 #endif
     ctx.f = f;
 
-    // step 5. set up debug info context and create first basic block
+    // step 5. Set up debugging context
+    DIBuilder dbuilder(*mod);
+    ctx.dbuilder = &dbuilder;
+    DIFile fil;
+    DISubprogram SP;
+
     jl_value_t *stmt = jl_cellref(stmts,0);
     std::string filename = "no file";
     char *dbgFuncName = lam->name->name;
@@ -2964,44 +2985,94 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
             }
         }
     }
-    ctx.lineno = lno;
+    ctx.lineno = lno;    
 
-    BasicBlock *b0 = BasicBlock::Create(jl_LLVMContext, "top", f);
-    builder.SetInsertPoint(b0);
+    llvm::DIArray EltTypeArray = ctx.dbuilder->getOrCreateArray(ArrayRef<Value*>());
 
-    llvm::DIArray EltTypeArray = dbuilder.getOrCreateArray(ArrayRef<Value*>());
-    DIFile fil;
-    DISubprogram SP;
-    //ios_printf(ios_stderr, "\n*** compiling %s at %s:%d\n\n",
-    //           lam->name->name, filename.c_str(), lno);
-
-    DebugLoc noDbg;
     bool debug_enabled = true;
     if (dbgFuncName[0] == 0) {
         // special value: if function name is empty, disable debug info
-        builder.SetCurrentDebugLocation(noDbg);
         debug_enabled = false;
     }
     else {
         // TODO: Fix when moving to new LLVM version
         #ifndef LLVM34
-        dbuilder.createCompileUnit(0x01, filename, ".", "julia", true, "", 0);
+        ctx.dbuilder->createCompileUnit(0x01, filename, ".", "julia", true, "", 0);
         #else
-        DICompileUnit CU = dbuilder.createCompileUnit(0x01, filename, ".", "julia", true, "", 0);
+        DICompileUnit CU = ctx.dbuilder->createCompileUnit(0x01, filename, ".", "julia", true, "", 0);
         #endif
 
-        fil = dbuilder.createFile(filename, ".");
+        fil = ctx.dbuilder->createFile(filename, ".");
         #ifndef LLVM34
-        SP = dbuilder.createFunction((DIDescriptor)dbuilder.getCU(),
+        SP = ctx.dbuilder->createFunction((DIDescriptor)dbuilder.getCU(),
         #else 
-        SP = dbuilder.createFunction(CU,
+        SP = ctx.dbuilder->createFunction(CU,
         #endif
-                                      lam->name->name, funcName.str(),
-                                      fil,
-                                      lno,
-                                      dbuilder.createSubroutineType(fil,EltTypeArray),
-                                      false, true,
-                                      0, true, f);
+          lam->name->name, funcName.str(),
+          fil,
+          lno,
+          ctx.dbuilder->createSubroutineType(fil,EltTypeArray),
+          false, true,
+          0, true, f);
+    }
+
+    // Go over all arguments and local variables and initialize their debug information
+    for(i=0; i < nreq; i++) {
+        jl_sym_t *argname = jl_decl_var(jl_cellref(largs,i));
+        jl_varinfo_t &varinfo = ctx.vars[argname];
+        varinfo.dinfo = ctx.dbuilder->createLocalVariable(
+            llvm::dwarf::DW_TAG_arg_variable,    // Tag
+            SP,         // Scope (current function will be fill in later)
+            argname->name,    // Variable name
+            fil,                    // File
+            ctx.lineno,             // Line (for now, use lineno of the function)
+            julia_type_to_di(varinfo.declType,&ctx,specsig), // Variable type
+            false,                  // May be optimized out
+            0,                      // Flags (TODO: Do we need any)
+            i+1);                   // Argument number (1-based)
+
+    }
+    if (va) {
+        ctx.vars[ctx.vaName].dinfo = ctx.dbuilder->createLocalVariable(
+            llvm::dwarf::DW_TAG_arg_variable,    // Tag
+            SP,         // Scope (current function will be fill in later)
+            ctx.vaName->name, // Variable name
+            fil,                    // File
+            ctx.lineno,             // Line (for now, use lineno of the function)
+            julia_type_to_di(ctx.vars[ctx.vaName].declType,&ctx,false),      // Variable type
+            false,                  // May be optimized out
+            0,                      // Flags (TODO: Do we need any)
+            nreq);                  // Argument number (1-based)
+    }
+    for(i=0; i < lvarslen; i++) {
+        jl_sym_t *s = (jl_sym_t*)jl_cellref(lvars,i);
+        jl_varinfo_t &varinfo = ctx.vars[s];
+        varinfo.dinfo = ctx.dbuilder->createLocalVariable(
+            llvm::dwarf::DW_TAG_auto_variable,    // Tag
+            SP,                     // Scope (current function will be fill in later)
+            s->name,                // Variable name
+            fil,                    // File
+            ctx.lineno,             // Line (for now, use lineno of the function)
+            julia_type_to_di(varinfo.declType,&ctx,specsig), // Variable type
+            false,                  // May be optimized out
+            0,                      // Flags (TODO: Do we need any)
+            0);                   // Argument number (1-based)
+    }
+
+    // step 5. create first basic block
+
+    BasicBlock *b0 = BasicBlock::Create(jl_LLVMContext, "top", f);
+    builder.SetInsertPoint(b0);
+
+    //ios_printf(ios_stderr, "\n*** compiling %s at %s:%d\n\n",
+    //           lam->name->name, filename.c_str(), lno);
+
+    DebugLoc noDbg;
+
+    if(!debug_enabled) {
+        builder.SetCurrentDebugLocation(noDbg);
+    }
+    else {
         // set initial line number
         builder.SetCurrentDebugLocation(DebugLoc::get(lno, 0, (MDNode*)SP, NULL));
     }
@@ -3204,6 +3275,7 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
                     theArg = boxed(theArg,&ctx);
                     builder.CreateStore(theArg, lv); // temporarily root
                 }
+                dbuilder.insertDbgValueIntrinsic(theArg,0,ctx.vars[s].dinfo,builder.GetInsertBlock());
                 builder.CreateStore(builder.CreateCall(prepare_call(jlbox_func), theArg), lv);
             }
             else if (dyn_cast<GetElementPtrInst>(lv) != NULL)
@@ -3352,7 +3424,7 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
 
     // step 18. Perform any delayed instantiations
     if (debug_enabled)
-        dbuilder.finalize();
+        ctx.dbuilder->finalize();
 
     JL_GC_POP();
     return f;
@@ -3427,6 +3499,25 @@ static void init_julia_llvm_env(Module *m)
     ArrayRef<Type*> vselts(valueStructElts);
     valueSt->setBody(vselts);
     jl_value_llvmt = valueSt;
+
+    DIBuilder dbuilder(*m);
+    DIFile julia_h = dbuilder.createFile("julia.h","");
+
+    jl_value_dillvmt = dbuilder.createStructType(DIDescriptor(),
+        "jl_value_t",
+        julia_h,
+        71, // At the time of this writing. Not sure if it's worth it to keep this in sync
+        sizeof(jl_value_t)*8,
+        __alignof__(jl_value_t)*8,
+        0, // Flags
+        DIType(), // Derived from
+        DIArray()); // Elements - will be corrected later
+
+    jl_pvalue_dillvmt = dbuilder.createPointerType(jl_value_dillvmt,sizeof(jl_value_t*)*8,
+                                                __alignof__(jl_value_t*)*8);
+
+    jl_value_dillvmt.addMember(jl_pvalue_dillvmt);
+
 
     jl_pvalue_llvmt = PointerType::get(jl_value_llvmt, 0);
     jl_ppvalue_llvmt = PointerType::get(jl_pvalue_llvmt, 0);

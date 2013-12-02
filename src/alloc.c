@@ -611,6 +611,7 @@ jl_datatype_t *jl_new_datatype(jl_sym_t *name, jl_datatype_t *super,
     t->ctor_factory = (jl_value_t*)jl_null;
     t->instance = NULL;
     t->struct_decl = NULL;
+    t->ditype = NULL;
     t->size = 0;
     t->alignment = 0;
     if (abstract || jl_tuple_len(parameters) > 0) {

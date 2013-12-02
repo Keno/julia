@@ -178,6 +178,23 @@ static Type *julia_struct_to_llvm(jl_value_t *jt)
     return julia_type_to_llvm(jt);
 }
 
+static DIType julia_type_to_di(jl_value_t *jt, jl_codectx_t *ctx, bool isboxed = false)
+{
+    if (jl_is_abstracttype(jt) || !jl_is_datatype(jt) || !jl_isbits(jt) || isboxed)
+        return jl_pvalue_dillvmt;
+    jl_datatype_t *jdt = (jl_datatype_t*)jt;
+    if (jdt->ditype != NULL)
+        return DIType((llvm::MDNode*)jdt->ditype);
+    if (jl_is_bitstype(jt)) {
+        DIType t = ctx->dbuilder->createBasicType(jdt->name->name->name,jdt->size,jdt->alignment,llvm::dwarf::DW_ATE_unsigned);
+        MDNode *M = t;
+        jdt->ditype = M;
+        return t;
+    }
+    // TODO: Fixme
+    return jl_pvalue_dillvmt;
+}
+
 // NOTE: llvm cannot express all julia types (for example unsigned),
 // so this is an approximation. it's only correct if the associated LLVM
 // value is not tagged with our value name hack.

@@ -245,6 +245,7 @@ typedef struct _jl_datatype_t {
     uint32_t alignment;  // strictest alignment over all fields
     uint32_t uid;
     void *struct_decl;  //llvm::Value*
+    void *ditype; // llvm::MDNode* to be used as llvm::DIType(ditype)
     jl_fielddesc_t fields[];
 } jl_datatype_t;
 
@@ -597,7 +598,7 @@ DLLEXPORT int jl_tupleisbits(jl_value_t *jt, int allow_unsized);
 STATIC_INLINE int jl_isbits(void *t)   // corresponding to isbits() in julia
 {
     return (jl_is_datatype(t) && !((jl_datatype_t*)t)->mutabl &&
-            ((jl_datatype_t*)t)->pointerfree && !((jl_datatype_t*)t)->abstract) || (jl_is_tuple(t) && jl_tupleisbits((jl_value_t*)t,1));
+            ((jl_datatype_t*)t)->pointerfree && !((jl_datatype_t*)t)->abstract);// || (jl_is_tuple(t) && jl_tupleisbits((jl_value_t*)t,1));
 }
 
 STATIC_INLINE int jl_is_abstracttype(void *v)
