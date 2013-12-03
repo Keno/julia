@@ -146,12 +146,21 @@ int jl_field_index(jl_datatype_t *t, jl_sym_t *fld, int err)
 jl_value_t *jl_get_nth_field(jl_value_t *v, size_t i)
 {
     jl_datatype_t *st = (jl_datatype_t*)jl_typeof(v);
-    size_t offs = jl_field_offset(st,i) + sizeof(void*);
-    if (st->fields[i].isptr) {
-        return *(jl_value_t**)((char*)v + offs);
+    size_t offs = jl_field_offset(st,i);
+    if (offs == -1)
+    {   
+        // We skipped this value when creating the type
+        // because it's a ghost. 
+        return static_void_instance(v);
+    } else {
+        offs += sizeof(void*);
+        if (jl_field_is_ptr(st,i)) {
+            return *(jl_value_t**)((char*)v + offs);
+        }
+        jl_value_t *jt = jl_tupleref(st->types,i);
+        return jl_new_bits((jl_datatype_t*)jt,
+                           (char*)v + offs);
     }
-    return jl_new_bits((jl_datatype_t*)jl_tupleref(st->types,i),
-                       (char*)v + offs);
 }
 
 int jl_field_isdefined(jl_value_t *v, jl_sym_t *fld, int err)
@@ -159,8 +168,11 @@ int jl_field_isdefined(jl_value_t *v, jl_sym_t *fld, int err)
     jl_datatype_t *st = (jl_datatype_t*)jl_typeof(v);
     int i = jl_field_index(st, fld, err);
     if (i == -1) return 0;
-    size_t offs = jl_field_offset(st,i) + sizeof(void*);
-    if (st->fields[i].isptr) {
+    size_t offs = jl_field_offset(st,i);
+    if (offs == -1)
+        return 1;
+    offs += sizeof(void*);
+    if (jl_field_is_ptr(st,i)) {
         return *(jl_value_t**)((char*)v + offs) != NULL;
     }
     return 1;
@@ -169,8 +181,11 @@ int jl_field_isdefined(jl_value_t *v, jl_sym_t *fld, int err)
 jl_value_t *jl_set_nth_field(jl_value_t *v, size_t i, jl_value_t *rhs)
 {
     jl_datatype_t *st = (jl_datatype_t*)jl_typeof(v);
-    size_t offs = jl_field_offset(st,i) + sizeof(void*);
-    if (st->fields[i].isptr) {
+    size_t offs = jl_field_offset(st,i);
+    if (offs == -1)
+        return rhs;
+    offs += sizeof(void*);
+    if (jl_field_is_ptr(st,i)) {
         *(jl_value_t**)((char*)v + offs) = rhs;
     }
     else {
@@ -642,8 +657,6 @@ jl_datatype_t *jl_new_datatype(jl_sym_t *name, jl_datatype_t *super,
     t->ditype = NULL;
     t->size = 0;
     t->alignment = 0;
-    // This will be updated when struct_decl is initialized
-    t->llvmidx = NULL;
     if (abstract || jl_tuple_len(parameters) > 0) {
         t->uid = 0;
     }

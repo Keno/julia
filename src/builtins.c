@@ -1001,15 +1001,21 @@ DLLEXPORT uptrint_t jl_object_id(jl_value_t *v)
         return bits_hash(jl_data_ptr(v), sz) ^ h;
     }
     for (size_t f=0; f < nf; f++) {
-        size_t offs = dt->fields[f].offset;
-        char *vo = (char*)jl_data_ptr(v) + offs;
+        size_t offs = jl_field_offset(dt,f);
         uptrint_t u;
-        if (dt->fields[f].isptr) {
-            jl_value_t *f = *(jl_value_t**)vo;
-            u = f==NULL ? 0 : jl_object_id(f);
+        if (offs == -1)
+        {
+            u = jl_object_id(static_void_instance(jl_tupleref(dt->types,f)));
         }
         else {
-            u = bits_hash(vo, dt->fields[f].size);
+            char *vo = (char*)jl_data_ptr(v) + offs;
+            if (jl_field_is_ptr(dt,f)) {
+                jl_value_t *f = *(jl_value_t**)vo;
+                u = f==NULL ? 0 : jl_object_id(f);
+            }
+            else {
+                u = bits_hash(vo, jl_field_size(dt,f));
+            }
         }
         h = bitmix(h, u);
     }
@@ -1338,10 +1344,9 @@ DLLEXPORT size_t jl_static_show(JL_STREAM *out, jl_value_t *v)
         size_t i, tlen = jl_tuple_len(t->names);
         for (i = 0; i < tlen; i++) {
             n += JL_PRINTF(out, ((jl_sym_t*)jl_tupleref(t->names, i))->name);
-            jl_fielddesc_t f = t->fields[i];
-            if (f.isptr) {
+            if (jl_field_is_ptr(t,i) && jl_field_offset(t,i) != -1) {
                 n += JL_PRINTF(out, "=");
-                n += jl_static_show(out, *((jl_value_t**)jl_data_ptr(v)+f.offset/sizeof(void*)));
+                n += jl_static_show(out, *((jl_value_t**)jl_data_ptr(v)+jl_field_offset(t,i)/sizeof(void*)));
             }
             else {
                 n += JL_PRINTF(out, "::");

@@ -142,7 +142,24 @@ static Type *julia_type_to_llvm(jl_value_t *jt)
         return Type::getIntNTy(jl_LLVMContext, nb*8);
     }
     if (jl_isbits(jt)) {
-        if (jl_is_datatype(jt) && ((jl_datatype_t*)jt)->size == 0) {
+        /*
+         * Here's how we deal with 0-sized things in general:
+         * - When passing them as arguments, we simply skip them and keep 
+         *   track of th mapping
+         * - When present in an unboxed tuple, we skip them as well. 
+         * - When present in a type we use a jl_value_t*
+         * The reason for the difference in the third case is that
+         * if we do not do this, we loose a mapping between the index
+         * of the field and the index of the field of the llvm type. 
+         * I have gone down that route and it is not pretty.
+         * Furthermore, in the third case, it is also not really worth
+         * it, as people rarely have a struct containing an empty type (for 
+         * the value is always known). The only case in which this really
+         * happens is when using a container type. If somebody comes
+         * up with a convincing use case, we may want to reconsider, but
+         * at this point I do not consider it worth the overhead. 
+         */
+        if (jl_is_datatype(jt) && ((jl_datatype_t*)jt)->size == 0 && jl_tuple_len(((jl_datatype_t*)jt)->names)) {
             // TODO: come up with a representation for a 0-size value,
             // and make this 0 size everywhere. as an argument, simply
             // skip passing it.
@@ -193,14 +210,6 @@ int jl_field_is_ptr(jl_datatype_t *st, size_t i)
     llvm::Type *t = (llvm::Type*)st->struct_decl;
     if (t == NULL)
         t = julia_struct_to_llvm((jl_value_t*)st);
-    if (t == jl_pvalue_llvmt) // type is unsized
-        return true;
-    if (st->llvmidx) {
-        i = st->llvmidx[i];
-        // Element is a ghost
-        if (i == -1)
-            return true;
-    }
     return dyn_cast<StructType>(t)->getElementType(i) == jl_pvalue_llvmt; 
 }
 
@@ -209,17 +218,9 @@ size_t jl_field_offset(jl_datatype_t *st, size_t i)
     llvm::Type *t = (llvm::Type*)st->struct_decl;
     if (t == NULL)
         t = julia_struct_to_llvm((jl_value_t*)st);
-    if (t == jl_pvalue_llvmt) // type is unsized
-        return -1;
-    if (st->llvmidx) {
-        i = st->llvmidx[i];
-        // Element is a ghost
-        if (i == -1)
-            return -1;
-    }    
     const StructLayout *layout = jl_data_layout->getStructLayout(dyn_cast<StructType>(t));
     assert(layout != NULL);
-    return layout->getElementOffset(st->llvmidx ? st->llvmidx[i] : i);
+    return layout->getElementOffset(i);
 }
 size_t jl_field_size(jl_datatype_t *st, size_t i)
 {

@@ -240,9 +240,6 @@ typedef struct _jl_datatype_t {
     uint32_t uid;
     void *struct_decl;  //llvm::Value*
     void *ditype; // llvm::MDNode* to be used as llvm::DIType(ditype)
-    // If this type contains ghosts, this array holds a mapping of field index->LLVM element index,
-    // otherwise NULL, indicating that this type does not contain ghosts
-    uint16_t *llvmidx;
 } jl_datatype_t;
 
 int jl_field_is_ptr(jl_datatype_t *st, size_t i);
