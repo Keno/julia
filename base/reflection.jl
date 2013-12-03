@@ -34,18 +34,18 @@ const isimmutable = x->(isa(x,Tuple) || !typeof(x).mutable)
 isstructtype(t::DataType) = t.names!=() || (t.size==0 && !t.abstract)
 isstructtype(x) = false
 isbits(t::DataType) = !t.mutable & t.pointerfree & isleaftype(t)
-isbits(t::Type) = false
-#isbits(t::UnionType) = false
-#function isbits(t::Tuple)
-#    i = 1
-#    while i <= tuplelen(t)
-#        if !isbits(tupleref(t,i))
-#            return false
-#        end
-#        i += 1
-#    end
-#    return true
-#end
+#isbits(t::Type) = false
+isbits(t::UnionType) = false
+function isbits(t::Tuple)
+    i = 1
+    while i <= tuplelen(t)
+        if !isbits(tupleref(t,i))
+            return false
+        end
+        i += 1
+    end
+    return true
+end
 isbits(x) = isbits(typeof(x))
 isleaftype(t::ANY) = ccall(:jl_is_leaf_type, Int32, (Any,), t) != 0
 

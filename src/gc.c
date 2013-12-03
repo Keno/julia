@@ -750,11 +750,12 @@ static void push_root(jl_value_t *v, int d)
         gc_mark_task((jl_task_t*)v, d);
     }
     else {
+        assert(jl_is_datatype(vt));
         jl_datatype_t *dt = (jl_datatype_t*)vt;
         int nf = (int)jl_tuple_len(dt->names);
         for(int i=0; i < nf; i++) {
-            if (dt->fields[i].isptr) {
-                jl_value_t *fld = *(jl_value_t**)((char*)v + dt->fields[i].offset + sizeof(void*));
+            if (jl_field_is_ptr(dt,i)) {
+                jl_value_t *fld = *(jl_value_t**)((char*)v + jl_field_offset(dt,i) + sizeof(void*));
                 if (fld)
                     gc_push_root(fld, d);
             }

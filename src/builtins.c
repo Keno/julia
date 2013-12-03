@@ -156,11 +156,13 @@ int jl_egal(jl_value_t *a, jl_value_t *b)
         return bits_equal(jl_data_ptr(a), jl_data_ptr(b), sz);
     }
     for (size_t f=0; f < nf; f++) {
-        size_t offs = dt->fields[f].offset;
+        size_t offs = jl_field_offset(dt,f);
+        if (offs == -1)
+            continue;
         char *ao = (char*)jl_data_ptr(a) + offs;
         char *bo = (char*)jl_data_ptr(b) + offs;
         int eq;
-        if (dt->fields[f].isptr) {
+        if (jl_field_is_ptr(dt,f)) {
             jl_value_t *af = *(jl_value_t**)ao;
             jl_value_t *bf = *(jl_value_t**)bo;
             if (af == bf) eq = 1;
@@ -168,7 +170,7 @@ int jl_egal(jl_value_t *a, jl_value_t *b)
             else eq = jl_egal(af, bf);
         }
         else {
-            eq = bits_equal(ao, bo, dt->fields[f].size);
+            eq = bits_equal(ao, bo, jl_field_size(dt,f));
         }
         if (!eq) return 0;
     }

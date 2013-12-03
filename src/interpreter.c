@@ -336,7 +336,7 @@ static jl_value_t *eval(jl_value_t *e, jl_value_t **locals, size_t nl)
         for(size_t i=0; i < jl_tuple_len(para); i++) {
             ((jl_tvar_t*)jl_tupleref(para,i))->bound = 0;
         }
-        jl_compute_field_offsets(dt);
+        //jl_compute_field_offsets(dt);
         jl_add_constructors(dt);
         JL_GC_POP();
         return (jl_value_t*)jl_nothing;

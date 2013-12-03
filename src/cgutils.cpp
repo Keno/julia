@@ -76,6 +76,9 @@ static Type *julia_type_to_llvm(jl_value_t *jt)
         Type *type = NULL;
         for (size_t i = 0; i < ntypes; ++i) {
             jl_value_t *elt = jl_tupleref(jt,i);
+            // e.g. jt == jl_tuple_type
+            if (elt == NULL)
+                return jl_pvalue_llvmt;
             purebits &= jl_isbits(elt);
             Type *newtype = julia_struct_to_llvm(elt);
             if (type != NULL && type != newtype)
@@ -139,7 +142,7 @@ static Type *julia_type_to_llvm(jl_value_t *jt)
         return Type::getIntNTy(jl_LLVMContext, nb*8);
     }
     if (jl_isbits(jt)) {
-        if (((jl_datatype_t*)jt)->size == 0) {
+        if (jl_is_datatype(jt) && ((jl_datatype_t*)jt)->size == 0) {
             // TODO: come up with a representation for a 0-size value,
             // and make this 0 size everywhere. as an argument, simply
             // skip passing it.
@@ -161,14 +164,21 @@ static Type *julia_struct_to_llvm(jl_value_t *jt)
             if (ntypes == 0)
                 return T_void;
             StructType *structdecl = StructType::create(getGlobalContext(), jst->name->name->name);
-            jst->struct_decl = structdecl;
+            jst->struct_decl = (Type*)structdecl;
             std::vector<Type *> latypes(0);
             size_t i;
             for(i = 0; i < ntypes; i++) {
                 jl_value_t *ty = jl_tupleref(jst->types, i);
-                Type *lty = ty==(jl_value_t*)jl_bool_type ? T_int8 : julia_type_to_llvm(ty);
-                if (jst->fields[i].isptr)
+                Type *lty;
+                if (ty == NULL) {
                     lty = jl_pvalue_llvmt;
+                }
+                else if(ty==(jl_value_t*)jl_bool_type) {
+                    lty = T_int8;
+                } 
+                else {
+                    lty = julia_type_to_llvm(ty);
+                }
                 latypes.push_back(lty);
             }
             structdecl->setBody(latypes);
@@ -176,6 +186,48 @@ static Type *julia_struct_to_llvm(jl_value_t *jt)
         return (Type*)jst->struct_decl;
     }
     return julia_type_to_llvm(jt);
+}
+
+int jl_field_is_ptr(jl_datatype_t *st, size_t i)
+{
+    llvm::Type *t = (llvm::Type*)st->struct_decl;
+    if (t == NULL)
+        t = julia_struct_to_llvm((jl_value_t*)st);
+    if (t == jl_pvalue_llvmt) // type is unsized
+        return true;
+    if (st->llvmidx) {
+        i = st->llvmidx[i];
+        // Element is a ghost
+        if (i == -1)
+            return true;
+    }
+    return dyn_cast<StructType>(t)->getElementType(i) == jl_pvalue_llvmt; 
+}
+
+size_t jl_field_offset(jl_datatype_t *st, size_t i)
+{
+    llvm::Type *t = (llvm::Type*)st->struct_decl;
+    if (t == NULL)
+        t = julia_struct_to_llvm((jl_value_t*)st);
+    if (t == jl_pvalue_llvmt) // type is unsized
+        return -1;
+    if (st->llvmidx) {
+        i = st->llvmidx[i];
+        // Element is a ghost
+        if (i == -1)
+            return -1;
+    }    
+    const StructLayout *layout = jl_data_layout->getStructLayout(dyn_cast<StructType>(t));
+    assert(layout != NULL);
+    return layout->getElementOffset(st->llvmidx ? st->llvmidx[i] : i);
+}
+size_t jl_field_size(jl_datatype_t *st, size_t i)
+{
+    jl_value_t *jt = jl_tupleref(st->types,i);
+    Type *t = julia_struct_to_llvm((jl_value_t*)jt);
+    if(t == T_void)
+        return -1;
+    return jl_data_layout->getTypeStoreSize(t);
 }
 
 static DIType julia_type_to_di(jl_value_t *jt, jl_codectx_t *ctx, bool isboxed = false)
@@ -997,7 +1049,7 @@ static Value *allocate_box_dynamic(Value *jlty, int nb, Value *v)
     return init_bits_value(newv, jlty, v->getType(), v);
 }
 
-static jl_value_t *static_void_instance(jl_value_t *jt)
+jl_value_t *static_void_instance(jl_value_t *jt)
 {
     if (jl_is_datatype(jt)) {
         jl_datatype_t *jb = (jl_datatype_t*)jt;

@@ -900,7 +900,7 @@ static bool is_getfield_nonallocating(jl_datatype_t *ty, jl_value_t *fld)
         name = (jl_sym_t*)jl_fieldref(fld,0);
     }
     for(size_t i=0; i < jl_tuple_len(ty->types); i++) {
-        if (!(ty->fields[i].isptr ||
+        if (!(jl_field_is_ptr(ty,i) ||
               (name && name != (jl_sym_t*)jl_tupleref(ty->names,i)))) {
             return false;
         }
@@ -1108,9 +1108,9 @@ static Value *emit_getfield(jl_value_t *expr, jl_sym_t *name, jl_codectx_t *ctx)
                 Value *addr =
                     builder.CreateGEP(builder.CreateBitCast(strct, T_pint8),
                                       ConstantInt::get(T_size,
-                                                       sty->fields[idx].offset + sizeof(void*)));
+                                                       jl_field_offset(sty,idx) + sizeof(void*)));
                 JL_GC_POP();
-                if (sty->fields[idx].isptr) {
+                if (jl_field_is_ptr(sty,idx)) {
                     Value *fldv = builder.CreateLoad(builder.CreateBitCast(addr,jl_ppvalue_llvmt));
                     null_pointer_check(fldv, ctx);
                     return fldv;
@@ -1125,7 +1125,7 @@ static Value *emit_getfield(jl_value_t *expr, jl_sym_t *name, jl_codectx_t *ctx)
                 if (jfty == (jl_value_t*)jl_bool_type) {
                     fldv = builder.CreateTrunc(fldv, T_int1);
                 }
-                else if (sty->fields[idx].isptr) {
+                else if (jl_field_is_ptr(sty,idx)) {
                     null_pointer_check(fldv, ctx);
                 }
                 JL_GC_POP();
@@ -1157,9 +1157,9 @@ static void emit_setfield(jl_datatype_t *sty, Value *strct, size_t idx,
     if (sty->mutabl || !checked) {
         Value *addr =
             builder.CreateGEP(builder.CreateBitCast(strct, T_pint8),
-                              ConstantInt::get(T_size, sty->fields[idx].offset + sizeof(void*)));
+                              ConstantInt::get(T_size, jl_field_offset(sty,idx) + sizeof(void*)));
         jl_value_t *jfty = jl_tupleref(sty->types, idx);
-        if (sty->fields[idx].isptr) {
+        if (jl_field_is_ptr(sty,idx)) {
             builder.CreateStore(boxed(rhs,ctx),
                                 builder.CreateBitCast(addr, jl_ppvalue_llvmt));
         }
@@ -1705,7 +1705,7 @@ static Value *emit_known_call(jl_value_t *ff, jl_value_t **args, size_t nargs,
                     // TODO: attempt better codegen for approximate types
                     Value *strct = emit_expr(args[1], ctx);
                     Value *rhs;
-                    if (sty->fields[idx].isptr)
+                    if (jl_field_is_ptr(sty,idx))
                         rhs = emit_expr(args[3], ctx);
                     else
                         rhs = emit_unboxed(args[3], ctx);
@@ -1967,7 +1967,7 @@ static Value *emit_checked_var(Value *bp, jl_sym_t *name, jl_codectx_t *ctx)
 
 static Value *ghostValue(jl_value_t *ty)
 {
-    if (jl_is_datatype(ty)) {
+    if (jl_is_datatype(ty) && jl_datatype_size(ty) != 0) {
         Type *llvmty = julia_struct_to_llvm(ty);
         assert(llvmty != T_void);
         return UndefValue::get(llvmty);
@@ -2056,6 +2056,12 @@ static void emit_assignment(jl_value_t *l, jl_value_t *r, jl_codectx_t *ctx)
     }
     else {
         jl_varinfo_t &vi = ctx->vars[s];
+        if(vi.isGhost)
+        {
+            // Assignment to ghost variables can still happen,
+            // e.g. x::Nothing = nothing
+            return;
+        }
         jl_value_t *rt = expr_type(r,ctx);
         if ((jl_is_symbol(r) || jl_is_symbolnode(r)) && rt == jl_bottom_type) {
             // sometimes x = y::None occurs
@@ -2079,6 +2085,8 @@ static void emit_assignment(jl_value_t *l, jl_value_t *r, jl_codectx_t *ctx)
             }
             if (builder.GetInsertBlock()->getTerminator() == NULL) {
                 builder.CreateStore(rval, bp, vi.isVolatile);
+            } else {
+                builder.GetInsertBlock()->dump();
             }
         }
         else {
@@ -2345,9 +2353,11 @@ static Value *emit_expr(jl_value_t *expr, jl_codectx_t *ctx, bool isboxed,
             jl_datatype_t *sty = (jl_datatype_t*)ty;
             size_t nf = jl_tuple_len(sty->names);
             if (nf > 0) {
-                if (jl_isbits(sty)) {
+                if (jl_isbits(sty) && jl_is_leaf_type((jl_value_t*)sty)) {
                     Type *lt = julia_type_to_llvm(ty);
-                    assert(lt != T_void);
+                    if (lt == T_void)
+                        return ghostValue(ty);
+                    assert(lt != jl_pvalue_llvmt);
                     Value *strct = UndefValue::get(lt);
                     size_t na = nargs-1 < nf ? nargs-1 : nf;
                     unsigned idx = 0;
@@ -2372,7 +2382,7 @@ static Value *emit_expr(jl_value_t *expr, jl_codectx_t *ctx, bool isboxed,
                 for(size_t i=1; i < nargs; i++) {
                     needroots |= might_need_root(args[i]);
                 }
-                if (nf > 0 && sty->fields[0].isptr && nargs>1) {
+                if (nf > 0 && jl_field_is_ptr(sty,0) && nargs>1) {
                     // emit first field before allocating struct to save
                     // a couple store instructions. avoids initializing
                     // the first field to NULL, and sometimes the GC root
@@ -2399,13 +2409,13 @@ static Value *emit_expr(jl_value_t *expr, jl_codectx_t *ctx, bool isboxed,
                     make_gcroot(strct, ctx);
                 }
                 for(size_t i=j; i < nf; i++) {
-                    if (sty->fields[i].isptr) {
+                    if (jl_field_is_ptr(sty,i)) {
                         emit_setfield(sty, strct, i, V_null, ctx, false);
                     }
                 }
                 for(size_t i=j+1; i < nargs; i++) {
                     Value *rhs = emit_expr(args[i],ctx);
-                    if (sty->fields[i-1].isptr && rhs->getType() != jl_pvalue_llvmt &&
+                    if (jl_field_is_ptr(sty,i-i) && rhs->getType() != jl_pvalue_llvmt &&
                         !needroots) {
                         // if this struct element needs boxing and we haven't rooted
                         // the struct, root it now.
@@ -2726,24 +2736,21 @@ static Function *gen_jlcall_wrapper(jl_lambda_info_t *lam, jl_expr_t *ast, Funct
         Value *theArg = builder.CreateLoad(argPtr, false);
         Value *theNewArg = theArg;
         argIdx++;
-        if ((jl_is_leaf_type(ty) && jl_isbits(ty) &&
-            ((jl_datatype_t*)ty)->size > 0)) {
-            Type *lty = julia_struct_to_llvm(ty);
-            assert(lty != NULL);
-            if (lty == T_void)
-                continue;
-            theNewArg = emit_unbox(lty, theArg, ty);
-        } 
-        else if(jl_is_tuple(ty)) {
-            Type *lty = julia_struct_to_llvm(ty);
-            if (lty != jl_pvalue_llvmt) {
-                if (lty == T_void)
-                    continue;
-                theNewArg = emit_unbox(lty, theArg, ty);
-            }
-        }
+        Type *lty = julia_type_to_llvm(ty);
+        assert(lty != NULL);
+        if (lty == T_void)
+            continue;
+        if (lty != jl_pvalue_llvmt)
+            theNewArg = emit_unbox(lty, theArg, ty); 
         assert(dyn_cast<UndefValue>(theNewArg) == NULL);
         args[idx] = theNewArg;
+        if(!(f->getFunctionType()->getParamType(idx) == theNewArg->getType()))
+        {
+            f->dump();
+            f->getFunctionType()->getParamType(idx)->dump();
+            theNewArg->dump();
+            abort();
+        }
         idx++;
     }
     // TODO: consider pulling the function pointer out of fArg so these
@@ -3107,6 +3114,8 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
     int n_roots = 0;
     for(i=0; i < largslen; i++) {
         jl_sym_t *s = jl_decl_var(jl_cellref(largs,i));
+        if (ctx.vars[s].isGhost)
+            continue;
         if (store_unboxed_p(s, &ctx)) {
             alloc_local(s, &ctx);
         }
@@ -3150,6 +3159,8 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
     int varnum = 0;
     for(i=0; i < largslen; i++) {
         jl_sym_t *s = jl_decl_var(jl_cellref(largs,i));
+        if (ctx.vars[s].isGhost)
+            continue;
         if (store_unboxed_p(s, &ctx)) {
         }
         else if (ctx.vars[s].isAssigned || (va && i==largslen-1)) {
@@ -3160,6 +3171,8 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
     }
     for(i=0; i < lvarslen; i++) {
         jl_sym_t *s = ((jl_sym_t*)jl_cellref(lvars,i));
+        if (ctx.vars[s].isGhost)
+            continue;
         if (store_unboxed_p(s, &ctx)) {
         }
         else if (ctx.vars[s].hasGCRoot) {
@@ -3241,6 +3254,9 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
             if (!ctx.vars[s].isGhost) {
                 argPtr = AI++;
                 argPtr = mark_julia_type(argPtr, jl_tupleref(lam->specTypes,i));
+            } else {
+                ctx.vars[s].passedAs = NULL;
+                continue;
             }
         }
         else {

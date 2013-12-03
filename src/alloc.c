@@ -196,6 +196,7 @@ DLLEXPORT jl_value_t *jl_new_struct(jl_datatype_t *type, ...)
 
 DLLEXPORT jl_value_t *jl_new_structv(jl_datatype_t *type, jl_value_t **args, uint32_t na)
 {
+    assert(jl_is_datatype(type));
     if (type->instance != NULL) return type->instance;
     size_t nf = jl_tuple_len(type->names);
     jl_value_t *jv = newstruct(type);
@@ -203,7 +204,7 @@ DLLEXPORT jl_value_t *jl_new_structv(jl_datatype_t *type, jl_value_t **args, uin
         jl_set_nth_field(jv, i, args[i]);
     }
     for(size_t i=na; i < nf; i++) {
-        if (type->fields[i].isptr)
+        if (jl_field_is_ptr(type,i))
             *(jl_value_t**)((char*)jv+jl_field_offset(type,i)+sizeof(void*)) = NULL;
     }
     if (type->size == 0) type->instance = jv;
@@ -531,8 +532,53 @@ jl_datatype_t *jl_new_uninitialized_datatype(size_t nfields)
 {
     return (jl_datatype_t*)
         newobj((jl_value_t*)jl_datatype_type,
-               NWORDS(sizeof(jl_datatype_t) - sizeof(void*) +
-                      nfields*sizeof(jl_fielddesc_t)));
+               NWORDS(sizeof(jl_datatype_t) - sizeof(void*)));
+}
+
+size_t jl_tuple_compute_size(jl_value_t *jt, size_t *al)
+{
+    if (jl_is_datatype(jt)) {
+        size_t alignm = ((jl_datatype_t*)jt)->alignment;
+        if(al && alignm > *al)
+            *al = alignm;
+        return jl_datatype_size(jt);
+    } 
+    size_t total = 0;
+    assert(jl_is_tuple(jt));
+    for(size_t i=0; i < jl_tuple_len(jt); i++)
+        total += jl_tuple_compute_size(jl_tupleref(jt,i),al);
+    return total;
+}
+
+/*
+static void _compute_field_offsets(jl_fielddesc_t *fields,jl_tuple_t *types,size_t *sz, size_t *alignm, int *ptrfree)
+{
+    for(size_t i=0; i < jl_tuple_len(types); i++) {
+        jl_value_t *ty = jl_tupleref(types, i);
+        size_t fsz, al;
+        if (jl_isbits(ty) && jl_is_leaf_type(ty))
+        {
+            if (jl_is_datatype(ty) && (al=((jl_datatype_t*)ty)->alignment)!=0) {
+                fsz = jl_datatype_size(ty);
+            }
+            else {
+                fsz = jl_tuple_compute_size(ty,&al);  
+            }
+            fields[i].isptr = 0;
+        }
+        else {
+            fsz = sizeof(void*);
+            al = fsz;
+            fields[i].isptr = 1;
+            *ptrfree = 0;
+        }
+        *sz = LLT_ALIGN(*sz, al);
+        if (al > *alignm)
+            *alignm = al;
+        fields[i].offset = *sz;
+        fields[i].size = fsz;
+        *sz += fsz;
+    }
 }
 
 void jl_compute_field_offsets(jl_datatype_t *st)
@@ -540,31 +586,13 @@ void jl_compute_field_offsets(jl_datatype_t *st)
     size_t sz = 0, alignm = 0;
     int ptrfree = 1;
 
-    for(size_t i=0; i < jl_tuple_len(st->types); i++) {
-        jl_value_t *ty = jl_tupleref(st->types, i);
-        size_t fsz, al;
-        if (jl_isbits(ty) && (al=((jl_datatype_t*)ty)->alignment)!=0 &&
-            jl_is_leaf_type(ty)) {
-            fsz = jl_datatype_size(ty);
-            st->fields[i].isptr = 0;
-        }
-        else {
-            fsz = sizeof(void*);
-            al = fsz;
-            st->fields[i].isptr = 1;
-            ptrfree = 0;
-        }
-        sz = LLT_ALIGN(sz, al);
-        if (al > alignm)
-            alignm = al;
-        st->fields[i].offset = sz;
-        st->fields[i].size = fsz;
-        sz += fsz;
-    }
+    _compute_field_offsets(st->fields,st->types,&sz,&alignm,&ptrfree);
+
     st->alignment = alignm;
     st->size = LLT_ALIGN(sz, alignm);
     st->pointerfree = ptrfree && !st->abstract;
 }
+*/
 
 extern int jl_boot_file_loaded;
 
@@ -614,13 +642,15 @@ jl_datatype_t *jl_new_datatype(jl_sym_t *name, jl_datatype_t *super,
     t->ditype = NULL;
     t->size = 0;
     t->alignment = 0;
+    // This will be updated when struct_decl is initialized
+    t->llvmidx = NULL;
     if (abstract || jl_tuple_len(parameters) > 0) {
         t->uid = 0;
     }
     else {
         t->uid = jl_assign_type_uid();
-        if (t->types != NULL)
-            jl_compute_field_offsets(t);
+        //if (t->types != NULL)
+        //    jl_compute_field_offsets(t);
     }
     JL_GC_POP();
     return t;

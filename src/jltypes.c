@@ -1791,7 +1791,7 @@ static jl_value_t *inst_type_w_(jl_value_t *t, jl_value_t **env, size_t n,
             // recursively instantiate the types of the fields
             ndt->types = (jl_tuple_t*)inst_type_w_((jl_value_t*)ftypes, env, n, stack);
             if (!isabstract) {
-                jl_compute_field_offsets(ndt);
+                //jl_compute_field_offsets(ndt);
             }
             else {
                 ndt->size = 0;
@@ -2803,7 +2803,8 @@ void jl_init_types(void)
     jl_tupleset(jl_datatype_type->types, 13, (jl_value_t*)jl_bool_type);
     jl_tupleset(jl_function_type->types, 0, pointer_void);
 
-    jl_compute_field_offsets(jl_datatype_type);
+
+/*    jl_compute_field_offsets(jl_datatype_type);
     jl_compute_field_offsets(jl_typename_type);
     jl_compute_field_offsets(jl_uniontype_type);
     jl_compute_field_offsets(jl_tvar_type);
@@ -2819,7 +2820,7 @@ void jl_init_types(void)
     jl_compute_field_offsets(jl_lambda_info_type);
     jl_compute_field_offsets(jl_box_type);
     jl_compute_field_offsets(jl_typector_type);
-    jl_compute_field_offsets(jl_function_type);
+    jl_compute_field_offsets(jl_function_type);*/
 
     call_sym = jl_symbol("call");
     call1_sym = jl_symbol("call1");

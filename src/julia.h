@@ -220,12 +220,6 @@ typedef struct {
     jl_tuple_t *types;
 } jl_uniontype_t;
 
-typedef struct {
-    uint16_t offset;   // offset relative to data start, excluding type tag
-    uint16_t size:15;
-    uint16_t isptr:1;
-} jl_fielddesc_t;
-
 typedef struct _jl_datatype_t {
     JL_DATA_TYPE
     JL_FUNC_FIELDS
@@ -246,11 +240,15 @@ typedef struct _jl_datatype_t {
     uint32_t uid;
     void *struct_decl;  //llvm::Value*
     void *ditype; // llvm::MDNode* to be used as llvm::DIType(ditype)
-    jl_fielddesc_t fields[];
+    // If this type contains ghosts, this array holds a mapping of field index->LLVM element index,
+    // otherwise NULL, indicating that this type does not contain ghosts
+    uint16_t *llvmidx;
 } jl_datatype_t;
 
-#define jl_field_offset(st,i) (((jl_datatype_t*)st)->fields[i].offset)
-#define jl_field_size(st,i)   (((jl_datatype_t*)st)->fields[i].size)
+int jl_field_is_ptr(jl_datatype_t *st, size_t i);
+size_t jl_field_offset(jl_datatype_t *st, size_t i);
+size_t jl_field_size(jl_datatype_t *st, size_t i);
+jl_value_t *static_void_instance(jl_value_t *jt);
 
 typedef struct {
     JL_DATA_TYPE
@@ -537,8 +535,8 @@ void *allocobj(size_t sz);
 #define jl_is_int64(v)       jl_typeis(v,jl_int64_type)
 #define jl_is_uint32(v)      jl_typeis(v,jl_uint32_type)
 #define jl_is_uint64(v)      jl_typeis(v,jl_uint64_type)
-#define jl_is_float(v)       jl_subtype(v,(jl_value_t*)jl_floatingpoint_type,true)
-#define jl_is_floattype(v)   jl_subtype(v,(jl_value_t*)jl_floatingpoint_type,false)
+#define jl_is_float(v)       (jl_floatingpoint_type != NULL) && jl_subtype(v,(jl_value_t*)jl_floatingpoint_type,true)
+#define jl_is_floattype(v)   (jl_floatingpoint_type != NULL) && jl_subtype(v,(jl_value_t*)jl_floatingpoint_type,false)
 #define jl_is_float32(v)     jl_typeis(v,jl_float32_type)
 #define jl_is_float64(v)     jl_typeis(v,jl_float64_type)
 #define jl_is_bool(v)        jl_typeis(v,jl_bool_type)
@@ -598,7 +596,7 @@ DLLEXPORT int jl_tupleisbits(jl_value_t *jt, int allow_unsized);
 STATIC_INLINE int jl_isbits(void *t)   // corresponding to isbits() in julia
 {
     return (jl_is_datatype(t) && !((jl_datatype_t*)t)->mutabl &&
-            ((jl_datatype_t*)t)->pointerfree && !((jl_datatype_t*)t)->abstract);// || (jl_is_tuple(t) && jl_tupleisbits((jl_value_t*)t,1));
+            ((jl_datatype_t*)t)->pointerfree && !((jl_datatype_t*)t)->abstract) || (jl_is_tuple(t) && jl_tupleisbits((jl_value_t*)t,1));
 }
 
 STATIC_INLINE int jl_is_abstracttype(void *v)
@@ -772,7 +770,7 @@ DLLEXPORT void *jl_unbox_voidpointer(jl_value_t *v);
 #endif
 
 // structs
-void jl_compute_field_offsets(jl_datatype_t *st);
+// void jl_compute_field_offsets(jl_datatype_t *st);
 int jl_field_index(jl_datatype_t *t, jl_sym_t *fld, int err);
 DLLEXPORT jl_value_t *jl_get_nth_field(jl_value_t *v, size_t i);
 jl_value_t *jl_set_nth_field(jl_value_t *v, size_t i, jl_value_t *rhs);

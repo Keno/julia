@@ -636,9 +636,9 @@ void julia_init(char *imageFile)
     jl_gc_disable();
 #endif
     jl_init_frontend();
+    jl_init_codegen();
     jl_init_types();
     jl_init_tasks(jl_stack_lo, jl_stack_hi-jl_stack_lo);
-    jl_init_codegen();
     jl_an_empty_cell = (jl_value_t*)jl_alloc_cell_1d(0);
 
     jl_init_serializer();
@@ -844,6 +844,7 @@ void jl_get_builtin_hooks(void)
     jl_root_task->exception = jl_nothing;
     jl_root_task->result = jl_nothing;
 
+    jl_floatingpoint_type = (jl_datatype_t*)core("FloatingPoint");
     jl_char_type    = (jl_datatype_t*)core("Char");
     jl_int8_type    = (jl_datatype_t*)core("Int8");
     jl_uint8_type   = (jl_datatype_t*)core("Uint8");
@@ -854,7 +855,6 @@ void jl_get_builtin_hooks(void)
 
     jl_float32_type = (jl_datatype_t*)core("Float32");
     jl_float64_type = (jl_datatype_t*)core("Float64");
-    jl_floatingpoint_type = (jl_datatype_t*)core("FloatingPoint");
 
     jl_stackovf_exception =
         jl_apply((jl_function_t*)core("StackOverflowError"), NULL, 0);
