@@ -178,7 +178,7 @@ static Type *julia_struct_to_llvm(jl_value_t *jt)
     return julia_type_to_llvm(jt);
 }
 
-static DIType julia_type_to_di(jl_value_t *jt, jl_codectx_t *ctx, bool isboxed = false)
+static DIType julia_type_to_di(jl_value_t *jt, DIBuilder *dbuilder, bool isboxed = false)
 {
     if (jl_is_abstracttype(jt) || !jl_is_datatype(jt) || !jl_isbits(jt) || isboxed)
         return jl_pvalue_dillvmt;
@@ -186,7 +186,7 @@ static DIType julia_type_to_di(jl_value_t *jt, jl_codectx_t *ctx, bool isboxed =
     if (jdt->ditype != NULL)
         return DIType((llvm::MDNode*)jdt->ditype);
     if (jl_is_bitstype(jt)) {
-        DIType t = ctx->dbuilder->createBasicType(jdt->name->name->name,jdt->size,jdt->alignment,llvm::dwarf::DW_ATE_unsigned);
+        DIType t = dbuilder->createBasicType(jdt->name->name->name,jdt->size,jdt->alignment,llvm::dwarf::DW_ATE_unsigned);
         MDNode *M = t;
         jdt->ditype = M;
         return t;

@@ -155,6 +155,8 @@ static Type *T_void;
 // Basic DITypes
 static DICompositeType jl_value_dillvmt;
 static DIDerivedType jl_pvalue_dillvmt;
+static DIDerivedType jl_ppvalue_dillvmt;
+static DICompositeType jl_di_func_sig;
 
 // constants
 static Value *V_null;
@@ -311,7 +313,7 @@ static Function *to_function(jl_lambda_info_t *li, bool cstyle)
     //f->dump();
     if (verifyFunction(*f,PrintMessageAction))
         f->dump();
-    FPM->run(*f);
+    //FPM->run(*f);
     //n_compile++;
     // print out the function's LLVM code
     //ios_printf(ios_stderr, "%s:%d\n",
@@ -2987,20 +2989,33 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
     }
     ctx.lineno = lno;    
 
-    llvm::DIArray EltTypeArray = ctx.dbuilder->getOrCreateArray(ArrayRef<Value*>());
-
     bool debug_enabled = true;
     if (dbgFuncName[0] == 0) {
         // special value: if function name is empty, disable debug info
         debug_enabled = false;
     }
     else {
+
         // TODO: Fix when moving to new LLVM version
         #ifndef LLVM34
         ctx.dbuilder->createCompileUnit(0x01, filename, ".", "julia", true, "", 0);
         #else
         DICompileUnit CU = ctx.dbuilder->createCompileUnit(0x01, filename, ".", "julia", true, "", 0);
         #endif
+
+        DICompositeType subrty;
+        if (!specsig) {
+            subrty = jl_di_func_sig;
+        } else {
+            llvm::DIArray EltTypeArray;
+            std::vector<Value*> ditypes(0);
+            for(size_t i=0; i < jl_tuple_len(lam->specTypes); i++) {
+                if(ctx.vars[jl_decl_var(jl_cellref(largs,i))].isGhost)
+                    continue;
+               ditypes.push_back(julia_type_to_di(jl_tupleref(lam->specTypes,i),ctx.dbuilder,false));
+            }
+            subrty = ctx.dbuilder->createSubroutineType(fil,ctx.dbuilder->getOrCreateArray(ditypes));
+        }
 
         fil = ctx.dbuilder->createFile(filename, ".");
         #ifndef LLVM34
@@ -3011,7 +3026,7 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
           lam->name->name, funcName.str(),
           fil,
           lno,
-          ctx.dbuilder->createSubroutineType(fil,EltTypeArray),
+          subrty,
           false, true,
           0, true, f);
     }
@@ -3026,8 +3041,8 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
             argname->name,    // Variable name
             fil,                    // File
             ctx.lineno,             // Line (for now, use lineno of the function)
-            julia_type_to_di(varinfo.declType,&ctx,specsig), // Variable type
-            false,                  // May be optimized out
+            julia_type_to_di(varinfo.declType,ctx.dbuilder,specsig), // Variable type
+            true,                  // May be optimized out
             0,                      // Flags (TODO: Do we need any)
             i+1);                   // Argument number (1-based)
 
@@ -3039,8 +3054,8 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
             ctx.vaName->name, // Variable name
             fil,                    // File
             ctx.lineno,             // Line (for now, use lineno of the function)
-            julia_type_to_di(ctx.vars[ctx.vaName].declType,&ctx,false),      // Variable type
-            false,                  // May be optimized out
+            julia_type_to_di(ctx.vars[ctx.vaName].declType,ctx.dbuilder,false),      // Variable type
+            true,                  // May be optimized out
             0,                      // Flags (TODO: Do we need any)
             nreq);                  // Argument number (1-based)
     }
@@ -3053,8 +3068,8 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
             s->name,                // Variable name
             fil,                    // File
             ctx.lineno,             // Line (for now, use lineno of the function)
-            julia_type_to_di(varinfo.declType,&ctx,specsig), // Variable type
-            false,                  // May be optimized out
+            julia_type_to_di(varinfo.declType,ctx.dbuilder,specsig), // Variable type
+            true,                  // May be optimized out
             0,                      // Flags (TODO: Do we need any)
             0);                   // Argument number (1-based)
     }
@@ -3517,6 +3532,19 @@ static void init_julia_llvm_env(Module *m)
                                                 __alignof__(jl_value_t*)*8);
 
     jl_value_dillvmt.addMember(jl_pvalue_dillvmt);
+
+    jl_ppvalue_dillvmt = dbuilder.createPointerType(jl_pvalue_dillvmt,sizeof(jl_value_t**)*8,
+                                                __alignof__(jl_value_t**)*8);
+
+    std::vector<Value*> diargs(0);
+    diargs.push_back(jl_pvalue_dillvmt);    // Return Type (ret value)
+    diargs.push_back(jl_pvalue_dillvmt);    // First Argument (function)
+    diargs.push_back(jl_ppvalue_dillvmt);   // Second Argument (argv)
+    // Third argument (length(argv))
+    diargs.push_back(julia_type_to_di((jl_value_t*)jl_int32_type,&dbuilder,false));
+
+    jl_di_func_sig = dbuilder.createSubroutineType(julia_h,
+        dbuilder.getOrCreateArray(diargs));
 
 
     jl_pvalue_llvmt = PointerType::get(jl_value_llvmt, 0);
