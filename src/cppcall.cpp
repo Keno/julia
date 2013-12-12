@@ -1,6 +1,7 @@
 // clang state
 #undef B0 //rom termios
 #include "llvm/ADT/DenseMapInfo.h"
+#include "llvm/Bitcode/ReaderWriter.h"
 #include "clang/Sema/ScopeInfo.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/RecursiveASTVisitor.h"
@@ -247,17 +248,24 @@ static Function *myCloneFunction(llvm::Function *toClone,FunctionMover *mover);
 class FunctionMover : public ValueMaterializer
 {
 public:
+    FunctionMover(llvm::Module *dest,llvm::Module *src) :
+        ValueMaterializer(), destModule(dest), srcModule(src), VMap()
+    {
+
+    } 
     ValueToValueMapTy VMap;
+    llvm::Module *destModule;
+    llvm::Module *srcModule;
     virtual Value *materializeValueFor (Value *V)
     {
         Function *F = dyn_cast<Function>(V);
         if(F)
         {
             if(F->isIntrinsic())
-                return cur_module->getOrInsertFunction(F->getName(),F->getFunctionType());
-            if(F->isDeclaration() || F->getParent() != cur_module)
+                return destModule->getOrInsertFunction(F->getName(),F->getFunctionType());
+            if(F->isDeclaration() || F->getParent() != destModule)
             {
-                Function *shadow = shadow_module->getFunction(F->getName());
+                Function *shadow = srcModule->getFunction(F->getName());
                 if (shadow != NULL && !shadow->isDeclaration())
                 {
                     // Not truly external
@@ -267,7 +275,7 @@ public:
                     {
                         return myCloneFunction(shadow,this);
                     } else {
-                        return cur_module->getOrInsertFunction(F->getName(),F->getFunctionType());
+                        return destModule->getOrInsertFunction(F->getName(),F->getFunctionType());
                     }
                 } else if (!F->isDeclaration())
                 {
@@ -275,16 +283,16 @@ public:
                 }
             }
             // Still a declaration and still in a diffrent module
-            if(F->isDeclaration() && F->getParent() != cur_module)
+            if(F->isDeclaration() && F->getParent() != destModule)
             {
                 // Create forward declaration in current module
-                return cur_module->getOrInsertFunction(F->getName(),F->getFunctionType());
+                return destModule->getOrInsertFunction(F->getName(),F->getFunctionType());
             }
         } else if (isa<GlobalVariable>(V))
         {
             GlobalVariable *GV = cast<GlobalVariable>(V);
             assert(GV != NULL);
-            GlobalVariable *newGV = new GlobalVariable(*cur_module,
+            GlobalVariable *newGV = new GlobalVariable(*destModule,
                 GV->getType()->getElementType(),
                 GV->isConstant(),
                 GlobalVariable::ExternalLinkage,
@@ -314,7 +322,7 @@ static Function *myCloneFunction(llvm::Function *toClone,FunctionMover *mover)
     Function *NewF = Function::Create(toClone->getFunctionType(),
         Function::ExternalLinkage,
         toClone->getName(),
-        cur_module);    
+        mover->destModule);    
     ClonedCodeInfo info;
     Function::arg_iterator DestI = NewF->arg_begin();
     for (Function::const_arg_iterator I = toClone->arg_begin(), E = toClone->arg_end();
@@ -334,6 +342,23 @@ static Function *myCloneFunction(llvm::Function *toClone,FunctionMover *mover)
     return NewF;
 }
 
+DLLEXPORT void copy_into(llvm::Function *src, llvm::Function *dest)
+{
+    FunctionMover mover(dest->getParent(),src->getParent());
+    Function::arg_iterator DestI = dest->arg_begin();
+    for (Function::const_arg_iterator I = src->arg_begin(), E = src->arg_end();
+      I != E; ++I) {
+        //if (mover->VMap.count(I) == 0) {   // Is this argument preserved?
+            mover.VMap[DestI] = DestI;
+            mover.VMap[I] = DestI++;        // Add mapping to VMap
+        //}
+    }  
+
+    dest->deleteBody();
+
+    SmallVector<ReturnInst*, 8> Returns;
+    llvm::CloneFunctionInto(dest,src,mover.VMap,true,Returns,"",NULL,NULL,&mover);
+}
 
 DLLEXPORT void cleanup_cpp_env(void *alloca_bb_ptr)
 {
@@ -353,19 +378,7 @@ DLLEXPORT void cleanup_cpp_env(void *alloca_bb_ptr)
     if (alloca_bb_ptr)
         ((llvm::Instruction *)alloca_bb_ptr)->eraseFromParent(); 
 
-    FunctionMover mover;
-    Function::arg_iterator DestI = cur_func->arg_begin();
-    for (Function::const_arg_iterator I = F->arg_begin(), E = F->arg_end();
-      I != E; ++I) {
-        //if (mover->VMap.count(I) == 0) {   // Is this argument preserved?
-            mover.VMap[I] = DestI++;        // Add mapping to VMap
-        //}
-    }
-
-    cur_func->deleteBody();
-
-    SmallVector<ReturnInst*, 8> Returns;
-    llvm::CloneFunctionInto(cur_func,F,mover.VMap,true,Returns,"",NULL,NULL,&mover);
+    copy_into(F,cur_func);
 
     F->eraseFromParent();
 }
@@ -443,11 +456,11 @@ DLLEXPORT extern "C" void *construct_CXXTemporaryObjectExpr(void *d)
 DLLEXPORT void *get_nth_argument(Function *f, size_t n)
 {
     size_t i = 0;
-    Function::arg_iterator AI = clang_cgf->CurFn->arg_begin();
-    for (; AI != clang_cgf->CurFn->arg_end(); ++i, ++AI)
+    Function::arg_iterator AI = f->arg_begin();
+    for (; AI != f->arg_end(); ++i, ++AI)
     {  
         if (i == n)
-            return AI++;
+            return (void*)((Value*)AI++);
     }
     return NULL;
 }
@@ -684,4 +697,27 @@ DLLEXPORT void cdump(void *decl)
 {
     ((clang::Decl*) decl)->dump();
 }
+
+
+// PDB specific functions
+DLLEXPORT llvm::Module *pdb_load_module(char *file)
+{
+    OwningPtr< MemoryBuffer > membuf;
+    MemoryBuffer::getFile(file,membuf);
+    if (membuf.get() == NULL)
+        return NULL;
+    return ParseBitcodeFile(membuf.get(),shadow_module->getContext());
+}
+
+DLLEXPORT void *pdb_lookup_function(llvm::Module *mod, char *name)
+{
+    return mod->getFunction(name);
+}
+
+DLLEXPORT unsigned int32_clang_type()
+{
+    return clang::BuiltinType::UInt;
+}
+
+
 }

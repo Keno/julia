@@ -731,11 +731,11 @@ static Value *emit_llvmcall(jl_value_t **args, size_t nargs, jl_codectx_t *ctx)
         jl_apply((jl_function_t*)jf,(jl_value_t**)argv,nargs);
         JL_GC_POP();
 
-        f->dump();
-        //if (verifyFunction(*f,PrintMessageAction)) {
-        //    f->dump();
-        //    jl_error("Malformed LLVM Function");
-        //}
+        //f->dump();
+        if (verifyFunction(*f,PrintMessageAction)) {
+            f->dump();
+            jl_error("Malformed LLVM Function");
+        }
     }
  
     /*
