@@ -624,6 +624,7 @@ static jl_value_t *jl_deserialize_datatype(ios_t *s, int pos)
     dt->size = size;
     dt->struct_decl = NULL;
     dt->instance = NULL;
+    dt->ditype = NULL;
 
     assert(tree_literal_values==NULL);
     ptrhash_put(&backref_table, (void*)(ptrint_t)pos, dt);
