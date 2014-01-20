@@ -29,7 +29,15 @@
 #include "llvm/ExecutionEngine/JITEventListener.h"
 #include "llvm/ExecutionEngine/JITMemoryManager.h"
 #include "llvm/PassManager.h"
+#if defined(LLVM_VERSION_MAJOR) && LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 5
+#define LLVM35
+#include "llvm/IR/Verifier.h"
+#include "llvm/AsmParser/Parser.h"
+#else
 #include "llvm/Analysis/Verifier.h"
+#include "llvm/Assembly/Parser.h"
+#include "llvm/Assembly/Writer.h"
+#endif
 #include "llvm/Analysis/Passes.h"
 #include "llvm/Bitcode/ReaderWriter.h"
 #if defined(LLVM_VERSION_MAJOR) && LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 4
@@ -78,9 +86,8 @@
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/DynamicLibrary.h"
 #include "llvm/Config/llvm-config.h"
-#include "llvm/Assembly/Parser.h"
-#include "llvm/Assembly/Writer.h"
 #include "llvm/Transforms/Utils/Cloning.h"
+#include "llvm/Transforms/Instrumentation.h"
 #include <setjmp.h>
 
 #include <string>
@@ -3018,6 +3025,9 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
     m = jl_Module;
 #endif
 
+    std::string str2 = funcName.str();
+    std::cout << str2;
+
     funcName << globalUnique++;
 
     if (specsig) {
@@ -3032,8 +3042,9 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
             }
         }
         Type *rt = (jlrettype == (jl_value_t*)jl_nothing->type ? T_void : julia_type_to_llvm(jlrettype));
+	std::string str = funcName.str();
         f = Function::Create(FunctionType::get(rt, fsig, false),
-                             Function::ExternalLinkage, funcName.str(), m);
+                             Function::ExternalLinkage, str, m);
         if (lam->cFunctionObject == NULL) {
             lam->cFunctionObject = (void*)f;
             lam->cFunctionID = jl_assign_functionID(f);
@@ -3934,6 +3945,8 @@ static void init_julia_llvm_env(Module *m)
 #endif
     FPM->add(jl_data_layout);
 
+    FPM->add(llvm::createMemorySanitizerPass(true,""));
+
     // list of passes from vmkit
     FPM->add(createCFGSimplificationPass()); // Clean up disgusting code
     FPM->add(createPromoteMemoryToRegisterPass());// Kill useless allocas
@@ -4040,11 +4053,10 @@ extern "C" void jl_init_codegen(void)
 #endif
 #ifdef USE_MCJIT
     jl_mcjmm = new SectionMemoryManager();
-#else
+#endif
     // Temporarily disable Haswell BMI2 features due to LLVM bug.
     const char *mattr[] = {"-bmi2", "-avx2"};
     std::vector<std::string> attrvec (mattr, mattr+2);
-#endif
     jl_ExecutionEngine = EngineBuilder(engine_module)
         .setEngineKind(EngineKind::JIT)
 #if defined(_OS_WINDOWS_) && defined(_CPU_X86_64_)

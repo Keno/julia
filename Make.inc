@@ -216,9 +216,14 @@ include $(JULIAHOME)/Make.user
 endif
 
 ifeq ($(SANITIZE),1)
+ifeq ($(SANITIZE_MEMORY),1)
+CXX += -fsanitize=memory -fsanitize-memory-track-origins -stdlib=libc++ -I$(LIBCXX_PATH)/include -L$(LIBCXX_PATH)/lib -Wl,-R$(LIBCXX_PATH)/lib -lc++abi
+CC += -fsanitize=memory -fsanitize-memory-track-origins -stdlib=libc++ -I$(LIBCXX_PATH)/include -L$(LIBCXX_PATH)/lib -Wl,-R$(LIBCXX_PATH)/lib -fno-omit-frame-pointer
+else
 JCXXFLAGS += -fsanitize=address -mllvm -asan-stack=0
 JCFLAGS += -fsanitize=address -mllvm -asan-stack=0
 LDFLAGS += -fsanitize=address
+endif
 endif
 
 # ===========================================================================
@@ -400,7 +405,10 @@ else
 endif
 
 ifeq ($(OS), Linux)
-OSLIBS += -ldl -lrt -lpthread -Wl,--export-dynamic -Wl,--version-script=$(JULIAHOME)/src/julia.expmap -Wl,--no-whole-archive $(LIBUNWIND)
+OSLIBS += -ldl -lrt -lpthread -Wl,--export-dynamic -Wl,--no-whole-archive $(LIBUNWIND)
+ifneq ($(SANITIZE_MEMORY),1)
+OSLIBS += -Wl,--version-script=$(JULIAHOME)/src/julia.expmap
+endif
 JLDFLAGS = -Wl,-Bdynamic
 endif
 
