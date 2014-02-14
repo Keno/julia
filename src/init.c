@@ -480,7 +480,7 @@ void *init_stdio_handle(uv_file fd,int readable)
     //printf("%d: %d -- %d\n", fd, type, 0);
     switch(type) {
         case UV_TTY:
-            handle = malloc(sizeof(uv_tty_t));
+            handle = malloc(sizeof(uv_tty_t)+1)+1;
             if (uv_tty_init(jl_io_loop,(uv_tty_t*)handle,fd,readable)) {
                 jl_errorf("Error initializing stdio in uv_tty_init (%d, %d)\n", fd, type);
                 abort();
@@ -497,7 +497,7 @@ void *init_stdio_handle(uv_file fd,int readable)
             handle = file;
             break;
         case UV_NAMED_PIPE:
-            handle = malloc(sizeof(uv_pipe_t));
+            handle = malloc(sizeof(uv_pipe_t)+1)+1;
             if (uv_pipe_init(jl_io_loop, (uv_pipe_t*)handle, (readable?UV_PIPE_READABLE:UV_PIPE_WRITABLE))) {
                 jl_errorf("Error initializing stdio in uv_pipe_init (%d, %d)\n", fd, type);
                 abort();
@@ -509,7 +509,7 @@ void *init_stdio_handle(uv_file fd,int readable)
             ((uv_pipe_t*)handle)->data=0;
             break;
         case UV_TCP:
-            handle = malloc(sizeof(uv_tcp_t));
+            handle = malloc(sizeof(uv_tcp_t)+1)+1;
             if (uv_tcp_init(jl_io_loop, (uv_tcp_t*)handle)) {
                 jl_errorf("Error initializing stdio in uv_tcp_init (%d, %d)\n", fd, type);
                 abort();
