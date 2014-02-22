@@ -262,7 +262,7 @@ end
 function TcpSocket()
     this = TcpSocket(c_malloc(_sizeof_uv_tcp))
     associate_julia_struct(this.handle,this)
-    finalizer(this,_close)
+    finalizer(this,uvfinalize)
     err = ccall(:uv_tcp_init,Cint,(Ptr{Void},Ptr{Void}),
                   eventloop(),this.handle)
     if err != 0 
@@ -289,9 +289,8 @@ type TcpServer <: UVServer
 end
 function TcpServer()
     this = TcpServer(c_malloc(_sizeof_uv_tcp))
-    uvhandles[this] = 0
     associate_julia_struct(this.handle, this)
-    finalizer(this,_close)
+    finalizer(this,uvfinalize)
     err = ccall(:uv_tcp_init,Cint,(Ptr{Void},Ptr{Void}),
                   eventloop(),this.handle)
     if err != 0 
@@ -301,6 +300,22 @@ function TcpServer()
     end
     this.status = StatusInit
     this
+end
+
+# Internal version of close that doesn't error when called on an unitialized socket, as well as disassociating the socket immidiately
+# This is fine because if we're calling this from a finalizer, nobody can be possibly waiting for the close to go through
+function uvfinalize(uv)
+    close(uv)
+    disassociate_julia_struct(uv)
+    uv.handle = 0
+end
+
+function uvfinalize(uv::Union(TTY,Pipe,TcpServer,TcpSocket))
+    if (uv.status != StatusUninit && uv.status != StatusInit)
+        close(uv)
+    end
+    disassociate_julia_struct(uv)
+    uv.handle = 0
 end
 
 isreadable(io::TcpSocket) = true

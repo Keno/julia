@@ -115,7 +115,7 @@ function Pipe()
     try
         ret = Pipe(handle)
         associate_julia_struct(ret.handle,ret)
-        finalizer(ret,_close)
+        finalizer(ret,uvfinalize)
         return init_pipe!(ret;readable=true)
     catch
         c_free(handle)
@@ -184,7 +184,7 @@ function TTY(fd::RawFD; readable::Bool = false)
     handle = c_malloc(_sizeof_uv_tty)
     ret = TTY(handle)
     associate_julia_struct(handle,ret)
-    finalizer(ret,_close)
+    finalizer(ret,uvfinalize)
     # This needs to go after associate_julia_struct so that there 
     # is no garbage in the ->data field
     uv_error("TTY",ccall(:uv_tty_init,Int32,(Ptr{Void},Ptr{Void},Int32,Int32),eventloop(),handle,fd.fd,readable))
@@ -216,6 +216,7 @@ make_stdout_stream() = _uv_tty2tty(ccall(:jl_stdout_stream, Ptr{Void}, ()))
 
 associate_julia_struct(handle::Ptr{Void},jlobj::ANY) = 
     ccall(:jl_uv_associate_julia_struct,Void,(Ptr{Void},Any),handle,jlobj)
+disassociate_julia_struct(uv) = disassociate_julia_struct(uv.handle)
 disassociate_julia_struct(handle::Ptr{Void}) = 
     ccall(:jl_uv_disassociate_julia_struct,Void,(Ptr{Void},),handle)
 
@@ -418,7 +419,7 @@ type IdleAsyncWork <: AsyncWork
             this.handle = C_NULL
             error(UVError("uv_make_timer",err))
         end
-        finalizer(this,close)
+        finalizer(this,uvfinalize)
         this
     end
 end
@@ -438,7 +439,7 @@ type Timer <: AsyncWork
             this.handle = C_NULL
             error(UVError("uv_make_timer",err))
         end
-        finalizer(this,close)
+        finalizer(this,uvfinalize)
         this
     end
 end
@@ -598,13 +599,6 @@ function close(stream::Union(AsyncStream,UVServer))
         stream.status = StatusClosing
     end
     nothing
-end
-
-# Internal version of close that doesn't error when called on an unitialized socket. 
-function _close(stream::Union(AsyncStream,UVServer)) 
-    if (stream.status != StatusUninit && stream.status != StatusInit)
-        close(stream)
-    end
 end
 
 ## stream functions ##
