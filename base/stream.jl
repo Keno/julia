@@ -111,7 +111,7 @@ type Pipe <: AsyncStream
         false,Condition())
 end
 function Pipe()
-    handle = malloc_pipe()
+    handle = c_malloc(_sizeof_uv_named_pipe)
     try
         ret = Pipe(handle)
         associate_julia_struct(ret.handle,ret)
@@ -143,17 +143,21 @@ function init_pipe!(pipe::Union(Pipe,PipeServer);readable::Bool=false,writable=f
     elseif pipe.status != StatusUninit
         error("pipe is already initialized")
     end
-    uv_error("init_pipe",ccall(:jl_init_pipe, Cint, (Ptr{Void},Int32,Int32,Int32,Any), pipe.handle, writable,readable,julia_only,pipe))
+    uv_error("init_pipe",ccall(:jl_init_pipe, Cint, (Ptr{Void},Int32,Int32,Int32), pipe.handle, writable,readable,julia_only))
     pipe.status = StatusInit
     pipe
 end
 
 function PipeServer()
-    handle = malloc_pipe()
+    handle = c_malloc(_sizeof_uv_named_pipe)
     try
-        return init_pipe!(PipeServer(handle);readable=true)
+        ret = PipeServer(handle)
+        associate_julia_struct(ret.handle,ret)
+        finalizer(ret,uvfinalize)
+        return init_pipe!(ret;readable=true)
     catch
         c_free(handle)
+        c_free(handle-1)
         rethrow()
     end
 end
@@ -218,7 +222,7 @@ associate_julia_struct(handle::Ptr{Void},jlobj::ANY) =
     ccall(:jl_uv_associate_julia_struct,Void,(Ptr{Void},Any),handle,jlobj)
 disassociate_julia_struct(uv) = disassociate_julia_struct(uv.handle)
 disassociate_julia_struct(handle::Ptr{Void}) = 
-    ccall(:jl_uv_disassociate_julia_struct,Void,(Ptr{Void},),handle)
+    handle != C_NULL && ccall(:jl_uv_disassociate_julia_struct,Void,(Ptr{Void},),handle)
 
 function init_stdio(handle)
     t = ccall(:jl_uv_handle_type,Int32,(Ptr{Void},),handle)
@@ -236,7 +240,8 @@ function init_stdio(handle)
         end
         ret.status = StatusOpen
         ret.line_buffered = false  
-        ccall(:jl_uv_associate_julia_struct,Void,(Ptr{Void},Any),ret.handle,ret)     
+        associate_julia_struct(ret.handle,ret)
+        finalizer(ret,uvfinalize)
         return ret
     end
 end
@@ -538,48 +543,52 @@ function process_events(block::Bool)
 end
 
 ## pipe functions ##
-malloc_pipe() = c_malloc(_sizeof_uv_named_pipe)
+function malloc_julia_pipe(x) 
+    x.handle = c_malloc(_sizeof_uv_named_pipe)
+    associate_julia_struct(x.handle,x)
+    finalizer(x,uvfinalize)
+end
 
 _link_pipe(read_end::Ptr{Void},write_end::Ptr{Void}) = uv_error("pipe_link",ccall(:uv_pipe_link, Int32, (Ptr{Void}, Ptr{Void}), read_end, write_end))
 
 function link_pipe(read_end::Ptr{Void},readable_julia_only::Bool,write_end::Ptr{Void},writable_julia_only::Bool,readpipe::AsyncStream,writepipe::AsyncStream)
     #make the pipe an unbuffered stream for now
     #TODO: this is probably not freeing memory properly after errors
-    uv_error("init_pipe",ccall(:jl_init_pipe, Cint, (Ptr{Void},Int32,Int32,Int32,Any), read_end, 0, 1, readable_julia_only, readpipe))
-    uv_error("init_pipe(2)",ccall(:jl_init_pipe, Cint, (Ptr{Void},Int32,Int32,Int32,Any), write_end, 1, 0, writable_julia_only, writepipe))
+    uv_error("init_pipe",ccall(:jl_init_pipe, Cint, (Ptr{Void},Int32,Int32,Int32), read_end, 0, 1, readable_julia_only))
+    uv_error("init_pipe(2)",ccall(:jl_init_pipe, Cint, (Ptr{Void},Int32,Int32,Int32), write_end, 1, 0, writable_julia_only))
     _link_pipe(read_end,write_end)
 end
 
 function link_pipe(read_end::Ptr{Void},readable_julia_only::Bool,write_end::Ptr{Void},writable_julia_only::Bool)
-    uv_error("init_pipe",ccall(:jl_init_pipe, Cint, (Ptr{Void},Int32,Int32,Int32,Ptr{Void}), read_end, 0, 1, readable_julia_only, C_NULL))
-    uv_error("init_pipe(2)",ccall(:jl_init_pipe, Cint, (Ptr{Void},Int32,Int32,Int32,Ptr{Void}), write_end, 1, 0, writable_julia_only, C_NULL))
+    uv_error("init_pipe",ccall(:jl_init_pipe, Cint, (Ptr{Void},Int32,Int32,Int32), read_end, 0, 1, readable_julia_only))
+    uv_error("init_pipe(2)",ccall(:jl_init_pipe, Cint, (Ptr{Void},Int32,Int32,Int32), write_end, 1, 0, writable_julia_only))
     _link_pipe(read_end,write_end)
 end
 
 function link_pipe(read_end::Pipe,readable_julia_only::Bool,write_end::Ptr{Void},writable_julia_only::Bool)
     if read_end.handle == C_NULL
-        read_end.handle = malloc_pipe()
+        malloc_julia_pipe(read_end)
     end
     init_pipe!(read_end; readable = true, writable = false, julia_only = readable_julia_only)
-    uv_error("init_pipe",ccall(:jl_init_pipe, Cint, (Ptr{Void},Int32,Int32,Int32,Any), write_end, 1, 0, writable_julia_only, read_end))
+    uv_error("init_pipe",ccall(:jl_init_pipe, Cint, (Ptr{Void},Int32,Int32,Int32), write_end, 1, 0, writable_julia_only))
     _link_pipe(read_end.handle,write_end)
     read_end.status = StatusOpen
 end
 function link_pipe(read_end::Ptr{Void},readable_julia_only::Bool,write_end::Pipe,writable_julia_only::Bool)
     if write_end.handle == C_NULL
-        write_end.handle = malloc_pipe()
+        malloc_julia_pipe(write_end)
     end
-    uv_error("init_pipe",ccall(:jl_init_pipe, Cint, (Ptr{Void},Int32,Int32,Int32,Any), read_end, 0, 1, readable_julia_only, write_end))
+    uv_error("init_pipe",ccall(:jl_init_pipe, Cint, (Ptr{Void},Int32,Int32,Int32), read_end, 0, 1, readable_julia_only))
     init_pipe!(write_end; readable = false, writable = true, julia_only = writable_julia_only)
     _link_pipe(read_end,write_end.handle)
     write_end.status = StatusOpen
 end
 function link_pipe(read_end::Pipe,readable_julia_only::Bool,write_end::Pipe,writable_julia_only::Bool)
     if write_end.handle == C_NULL
-        write_end.handle = malloc_pipe()
+        malloc_julia_pipe(write_end)
     end
     if read_end.handle == C_NULL
-        read_end.handle = malloc_pipe()
+        malloc_julia_pipe(read_end)
     end
     init_pipe!(read_end; readable = true, writable = false, julia_only = readable_julia_only)
     init_pipe!(write_end; readable = false, writable = true, julia_only = writable_julia_only)
@@ -749,7 +758,7 @@ function write(s::AsyncStream, b::Uint8)
     ct = current_task()
     uv_req_set_data(uvw,ct)
     ct.state = :waiting
-    stream_wait(s)
+    stream_wait(ct)
     return 1
 end
 function write(s::AsyncStream, c::Char)
@@ -757,7 +766,7 @@ function write(s::AsyncStream, c::Char)
     ct = current_task()
     uv_req_set_data(uvw,ct)
     ct.state = :waiting
-    stream_wait(s)
+    stream_wait(ct)
     return utf8sizeof(c)
 end
 function write{T}(s::AsyncStream, a::Array{T})
@@ -767,7 +776,7 @@ function write{T}(s::AsyncStream, a::Array{T})
         ct = current_task()
         uv_req_set_data(uvw,ct)
         ct.state = :waiting
-        stream_wait(s)
+        stream_wait(ct)
         return int(length(a)*sizeof(T))
     else
         check_open(s)
@@ -779,7 +788,7 @@ function write(s::AsyncStream, p::Ptr, nb::Integer)
     ct = current_task()
     uv_req_set_data(uvw,ct)
     ct.state = :waiting
-    stream_wait(s)
+    stream_wait(ct)
     return int(nb)
 end
 
