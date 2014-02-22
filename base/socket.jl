@@ -261,7 +261,8 @@ type TcpSocket <: Socket
 end
 function TcpSocket()
     this = TcpSocket(c_malloc(_sizeof_uv_tcp))
-    associate_julia_struct(this.handle, this)
+    associate_julia_struct(this.handle,this)
+    finalizer(this,_close)
     err = ccall(:uv_tcp_init,Cint,(Ptr{Void},Ptr{Void}),
                   eventloop(),this.handle)
     if err != 0 
@@ -288,7 +289,9 @@ type TcpServer <: UVServer
 end
 function TcpServer()
     this = TcpServer(c_malloc(_sizeof_uv_tcp))
+    uvhandles[this] = 0
     associate_julia_struct(this.handle, this)
+    finalizer(this,_close)
     err = ccall(:uv_tcp_init,Cint,(Ptr{Void},Ptr{Void}),
                   eventloop(),this.handle)
     if err != 0 
@@ -435,7 +438,7 @@ function recv(sock::UdpSocket)
         error("Invalid socket state")
     end
     _recv_start(sock)
-    wait(sock.recvnotify)::Vector{Uint8}
+    stream_wait(sock,sock.recvnotify)::Vector{Uint8}
 end
 
 function _uv_hook_recv(sock::UdpSocket, nread::Ptr{Void}, buf_addr::Ptr{Void}, buf_size::Int32, addr::Ptr{Void}, flags::Int32)
@@ -463,7 +466,7 @@ function send(sock::UdpSocket,ipaddr,port,msg)
         error("Invalid socket state")
     end
     uv_error("send",_send(sock,ipaddr,uint16(port),msg))
-    wait(sock.sendnotify)
+    stream_wait(sock,sock.sendnotify)
     nothing
 end
 

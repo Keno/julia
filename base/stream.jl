@@ -10,6 +10,13 @@ abstract UVServer
 typealias UVHandle Ptr{Void}
 typealias UVStream AsyncStream
 
+# A dict of all libuv handles that are being waited on somewhere in the system 
+# and should thus not be garbage collected
+const uvhandles = ObjectIdDict()
+
+preserve_handle(x) = uvhandles[x] = get(uvhandles,x,0)+1
+unpreserve_handle(x) = (v = uvhandles[x]; v == 1 ? uvhandles[x] = v-1 : pop!(uvhandles,x); nothing)
+
 #Wrapper for an OS file descriptor (on both Unix and Windows)
 immutable RawFD
     fd::Int32
@@ -106,7 +113,10 @@ end
 function Pipe()
     handle = malloc_pipe()
     try
-        return init_pipe!(Pipe(handle);readable=true)
+        ret = Pipe(handle)
+        associate_julia_struct(ret.handle,ret)
+        finalizer(ret,_close)
+        return init_pipe!(ret;readable=true)
     catch
         c_free(handle)
         rethrow()
@@ -174,6 +184,7 @@ function TTY(fd::RawFD; readable::Bool = false)
     handle = c_malloc(_sizeof_uv_tty)
     ret = TTY(handle)
     associate_julia_struct(handle,ret)
+    finalizer(ret,_close)
     # This needs to go after associate_julia_struct so that there 
     # is no garbage in the ->data field
     uv_error("TTY",ccall(:uv_tty_init,Int32,(Ptr{Void},Ptr{Void},Int32,Int32),eventloop(),handle,fd.fd,readable))
@@ -229,6 +240,15 @@ function init_stdio(handle)
     end
 end
 
+function stream_wait(x,c...)
+    preserve_handle(x)
+    try
+        return wait(c...)
+    finally
+        unpreserve_handle(x)
+    end
+end
+
 function reinit_stdio()
     global uv_jl_asynccb = cglobal(:jl_uv_asynccb)
     global uv_jl_alloc_buf = cglobal(:jl_uv_alloc_buf)
@@ -262,7 +282,7 @@ end
 function wait_connected(x)
     check_open(x)
     while x.status == StatusConnecting
-        wait(x.connectnotify)
+        stream_wait(x,x.connectnotify)
         check_open(x)
     end
 end
@@ -270,7 +290,7 @@ end
 function wait_readbyte(x::AsyncStream, c::Uint8)
     while isopen(x) && search(x.buffer,c) <= 0
         start_reading(x)
-        wait(x.readnotify)
+        stream_wait(x,x.readnotify)
     end
 end
 
@@ -279,11 +299,11 @@ wait_readline(x) = wait_readbyte(x, uint8('\n'))
 function wait_readnb(x::AsyncStream, nb::Int)
     while isopen(x) && nb_available(x.buffer) < nb
         start_reading(x)
-        wait(x.readnotify)
+        stream_wait(x,x.readnotify)
     end
 end
 
-wait_close(x) = if isopen(x) wait(x.closenotify); end
+wait_close(x) = if isopen(x) stream_wait(x,x.closenotify); end
 
 #from `connect`
 function _uv_hook_connectcb(sock::AsyncStream, status::Int32)
@@ -380,6 +400,7 @@ type SingleAsyncWork <: AsyncWork
     function SingleAsyncWork(cb::Function)
         this = new(c_malloc(_sizeof_uv_async), cb)
         associate_julia_struct(this.handle, this)
+        preserve_handle(this)
         err = ccall(:uv_async_init,Cint,(Ptr{Void},Ptr{Void},Ptr{Void}),eventloop(),this.handle,uv_jl_asynccb::Ptr{Void})
         this
     end
@@ -441,7 +462,7 @@ function _uv_hook_asynccb(async::AsyncWork, status::Int32)
     if isa(async, Timer)
         if ccall(:uv_timer_get_repeat, Uint64, (Ptr{Void},), async.handle) == 0
             # timer is stopped now
-            disassociate_julia_struct(async.handle) # we want gc to be able to cleanup
+            disassociate_julia_struct(async.handle)
         end
     end
     try
@@ -459,7 +480,7 @@ function _uv_hook_asynccb(async::AsyncWork, status::Int32)
 end
 
 function start_timer(timer::Timer, timeout::Real, repeat::Real)
-    associate_julia_struct(timer.handle, timer) # we don't want gc to cleanup
+    associate_julia_struct(timer.handle, timer)
     ccall(:uv_update_time,Void,(Ptr{Void},),eventloop())
     ccall(:uv_timer_start,Cint,(Ptr{Void},Ptr{Void},Uint64,Uint64),
         timer.handle, uv_jl_asynccb::Ptr{Void}, uint64(round(timeout*1000))+1, uint64(round(repeat*1000)))
@@ -467,7 +488,7 @@ end
 
 function stop_timer(timer::Timer)
     ccall(:uv_timer_stop,Cint,(Ptr{Void},),timer.handle)
-    disassociate_julia_struct(timer.handle) # we want gc to be able to cleanup
+    disassociate_julia_struct(timer.handle)
 end
 
 function sleep(sec::Real)
@@ -481,7 +502,7 @@ function sleep(sec::Real)
     end)
     start_timer(timer, float(sec), 0)
     try
-        wait(w)
+        stream_wait(timer,w)
     finally
         stop_timer(timer)
     end
@@ -490,7 +511,7 @@ end
 
 function add_idle_cb(cb::Function)
     work = IdleAsyncWork(cb)
-    associate_julia_struct(work.handle, work) # we don't want gc to cleanup
+    associate_julia_struct(work.handle, work)
     ccall(:uv_idle_start,Cint,(Ptr{Void},Ptr{Void}),work.handle,uv_jl_asynccb::Ptr{Void})
     work
 end
@@ -577,6 +598,13 @@ function close(stream::Union(AsyncStream,UVServer))
         stream.status = StatusClosing
     end
     nothing
+end
+
+# Internal version of close that doesn't error when called on an unitialized socket. 
+function _close(stream::Union(AsyncStream,UVServer)) 
+    if (stream.status != StatusUninit && stream.status != StatusInit)
+        close(stream)
+    end
 end
 
 ## stream functions ##
@@ -727,7 +755,7 @@ function write(s::AsyncStream, b::Uint8)
     ct = current_task()
     uv_req_set_data(uvw,ct)
     ct.state = :waiting
-    wait()
+    stream_wait(s)
     return 1
 end
 function write(s::AsyncStream, c::Char)
@@ -735,7 +763,7 @@ function write(s::AsyncStream, c::Char)
     ct = current_task()
     uv_req_set_data(uvw,ct)
     ct.state = :waiting
-    wait()
+    stream_wait(s)
     return utf8sizeof(c)
 end
 function write{T}(s::AsyncStream, a::Array{T})
@@ -745,7 +773,7 @@ function write{T}(s::AsyncStream, a::Array{T})
         ct = current_task()
         uv_req_set_data(uvw,ct)
         ct.state = :waiting
-        wait()
+        stream_wait(s)
         return int(length(a)*sizeof(T))
     else
         check_open(s)
@@ -757,7 +785,7 @@ function write(s::AsyncStream, p::Ptr, nb::Integer)
     ct = current_task()
     uv_req_set_data(uvw,ct)
     ct.state = :waiting
-    wait()
+    stream_wait(s)
     return int(nb)
 end
 
@@ -819,7 +847,7 @@ function accept(server::UVServer, client::AsyncStream)
         elseif err != UV_EAGAIN
             uv_error("accept",err)
         end
-        wait(server.connectnotify)
+        stream_wait(server,server.connectnotify)
     end
     error("server was closed while attempting to accept a client")
 end
