@@ -15,7 +15,7 @@ typealias UVStream AsyncStream
 const uvhandles = ObjectIdDict()
 
 preserve_handle(x) = uvhandles[x] = get(uvhandles,x,0)+1
-unpreserve_handle(x) = (v = uvhandles[x]; v == 1 ? uvhandles[x] = v-1 : pop!(uvhandles,x); nothing)
+unpreserve_handle(x) = (v = uvhandles[x]; v == 1 ? pop!(uvhandles,x) : (uvhandles[x] = v-1); nothing)
 
 #Wrapper for an OS file descriptor (on both Unix and Windows)
 immutable RawFD
