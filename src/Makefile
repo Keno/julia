@@ -13,7 +13,8 @@ SRCS = \
 FLAGS = \
 	-D_GNU_SOURCE -Iflisp -Isupport \
 	-I$(call exec,$(LLVM_CONFIG) --includedir) \
-	-I$(LIBUV_INC) -I$(build_includedir) -DLIBRARY_EXPORTS
+	-I$(LIBUV_INC) -I$(build_includedir) -DLIBRARY_EXPORTS \
+	-I$(JULIAHOME)/deps/llvm-$(LLVM_VER)/tools/clang/lib
 ifneq ($(USEMSVC), 1)
 FLAGS += -Wall -Wno-strict-aliasing -fno-omit-frame-pointer -fvisibility=hidden -fno-common
 endif
@@ -23,7 +24,13 @@ ifeq ($(USE_LLVM_SHLIB),1)
 LLVMLINK = -lLLVM-$(LLVM_VER)
 endif
 
-COMMON_LIBS = -L$(build_shlibdir) -L$(build_libdir) $(LIBUV) $(LIBUTF8PROC) $(NO_WHOLE_ARCHIVE) $(call exec,$(LLVM_CONFIG) --ldflags) $(LLVMLINK) $(OSLIBS)
+CLANG_LIBS = -lclangFrontendTool -lclangBasic -lclangLex -lclangDriver -lclangFrontend -lclangParse \
+    -lclangAST -lclangASTMatchers -lclangSema -lclangAnalysis -lclangEdit \
+    -lclangRewriteFrontend -lclangRewriteCore -lclangSerialization -lclangStaticAnalyzerCheckers \
+    -lclangStaticAnalyzerCore -lclangStaticAnalyzerFrontend -lclangTooling \
+    -lclangCodeGen -lclangARCMigrate
+
+COMMON_LIBS = -L$(build_shlibdir) -L$(build_libdir) $(LIBUV) $(LIBUTF8PROC) $(NO_WHOLE_ARCHIVE) $(call exec,$(LLVM_CONFIG) --ldflags) $(LLVMLINK) $(OSLIBS) $(CLANG_LIBS)
 DEBUG_LIBS = $(WHOLE_ARCHIVE) $(JULIAHOME)/src/flisp/libflisp-debug.a $(WHOLE_ARCHIVE) $(JULIAHOME)/src/support/libsupport-debug.a $(COMMON_LIBS)
 RELEASE_LIBS = $(WHOLE_ARCHIVE) $(JULIAHOME)/src/flisp/libflisp.a $(WHOLE_ARCHIVE) $(JULIAHOME)/src/support/libsupport.a $(COMMON_LIBS)
 

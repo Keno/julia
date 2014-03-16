@@ -519,7 +519,7 @@ function builtin_tfunction(f::ANY, args::ANY, argtypes::ANY)
         return None
     end
     if is(f,typeassert) || is(f,tupleref) || is(f,getfield) ||
-       is(f,apply_type) || is(f,fieldtype)
+       is(f,apply_type) || is(f,fieldtype) || is(f,Base.Intrinsics.llvmcall)
         # TODO: case of apply(), where we do not have the args
         return tf[3](args, argtypes...)
     end

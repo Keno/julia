@@ -831,6 +831,7 @@ const jl_value_t *jl_dump_function(jl_function_t *f, jl_tuple_t *types, bool dum
 // --- code gen for intrinsic functions ---
 
 #include "intrinsics.cpp"
+#include "cppcall.cpp"
 
 // --- constant determination ---
 
@@ -1272,7 +1273,7 @@ static Value *emit_lambda_closure(jl_value_t *expr, jl_codectx_t *ctx)
 
     int argStart = ctx->argDepth;
     size_t clen = jl_array_dim0(capt);
-    Value **captured = (Value**) alloca((1+clen)*sizeof(Value*));
+    Value **captured = (Value**) __builtin_alloca((1+clen)*sizeof(Value*));
     captured[0] = ConstantInt::get(T_size, clen);
     for(i=0; i < clen; i++) {
         Value *val;
@@ -2195,7 +2196,7 @@ static Value *emit_call(jl_value_t **args, size_t arglen, jl_codectx_t *ctx,
         Function *cf = (Function*)f->linfo->cFunctionObject;
         FunctionType *cft = cf->getFunctionType();
         size_t nfargs = cft->getNumParams();
-        Value **argvals = (Value**) alloca(nfargs*sizeof(Value*));
+        Value **argvals = (Value**) __builtin_alloca(nfargs*sizeof(Value*));
         unsigned idx = 0;
         for(size_t i=0; i < nargs; i++) {
             Type *at = cft->getParamType(idx);
@@ -3096,7 +3097,7 @@ static Function *gen_jlcall_wrapper(jl_lambda_info_t *lam, jl_expr_t *ast, Funct
 
     size_t nargs = jl_tuple_len(lam->specTypes);
     size_t nfargs = f->getFunctionType()->getNumParams();
-    Value **args = (Value**) alloca(nfargs*sizeof(Value*));
+    Value **args = (Value**) __builtin_alloca(nfargs*sizeof(Value*));
     unsigned argIdx = 0;
     unsigned idx = 0;
     for(size_t i=0; i < nargs; i++) {
