@@ -21,6 +21,7 @@
 #include "clang/Frontend/FrontendAction.h"
 #include "clang/Sema/SemaDiagnostic.h"
 #include "clang/Sema/Lookup.h"
+#include "clang/Sema/Initialization.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/StringSwitch.h"
 #include <clang/Frontend/CompilerInstance.h>
@@ -72,6 +73,7 @@ typedef struct cppcall_state {
     llvm::Function *CurFn;
     llvm::BasicBlock *block;
     llvm::BasicBlock::iterator point;
+    llvm::Instruction *prev_alloca_bb_ptr;
     // Current state
     llvm::Instruction *alloca_bb_ptr;
 } cppcall_state_t;
@@ -308,6 +310,7 @@ DLLEXPORT void *setup_cpp_env(void *module, void *jlfunc)
     state->CurFn = clang_cgf->CurFn;
     state->block = clang_cgf->Builder.GetInsertBlock();
     state->point = clang_cgf->Builder.GetInsertPoint();
+    state->prev_alloca_bb_ptr = clang_cgf->AllocaInsertPt;
 
     llvm::Function *w = (Function *)jlfunc;
     assert(w != NULL);
@@ -492,6 +495,7 @@ DLLEXPORT void cleanup_cpp_env(cppcall_state_t *state)
     cur_func = state->func;
     clang_cgf->CurFn = state->CurFn;
     clang_cgf->Builder.SetInsertPoint(state->block,state->point);
+    clang_cgf->AllocaInsertPt = state->prev_alloca_bb_ptr;
     delete state;
 }
 
@@ -565,11 +569,52 @@ DLLEXPORT extern "C" void *construct_CXXTemporaryObjectExpr(void *d)
 }
  */
 
-DLLEXPORT void *typeconstruct(clang::Type *t, clang::Expr **exprs, size_t nexprs)
+DLLEXPORT void *typeconstruct(clang::Type *t, clang::Expr **rawexprs, size_t nexprs)
 {
-    return (void*)clang_compiler->getSema().BuildCXXTypeConstructExpr(clang_astcontext->getTrivialTypeSourceInfo(clang::QualType(t,0),
-        clang::SourceLocation()),clang::SourceLocation(),
-        clang::MultiExprArg(exprs,nexprs),clang::SourceLocation()).take();
+    clang::QualType Ty(t,0);
+    clang::MultiExprArg Exprs(rawexprs,nexprs);
+
+    clang::Sema &sema = clang_compiler->getSema();
+    clang::TypeSourceInfo *TInfo = clang_astcontext->getTrivialTypeSourceInfo(Ty);
+
+    if (Ty->isDependentType() || clang::CallExpr::hasAnyTypeDependentArguments(Exprs)) {
+        return clang::CXXUnresolvedConstructExpr::Create(*clang_astcontext, TInfo,
+                                                      clang::SourceLocation(),
+                                                      Exprs,
+                                                      clang::SourceLocation());
+    }
+  
+    clang::ExprResult Result;
+
+    if (Exprs.size() == 1) {
+        clang::Expr *Arg = Exprs[0];
+        Result = sema.BuildCXXFunctionalCastExpr(TInfo, clang::SourceLocation(), Arg, clang::SourceLocation());
+        assert(!Result.isInvalid());
+        return Result.get();
+    }
+
+    if (!Ty->isVoidType() &&
+        sema.RequireCompleteType(clang::SourceLocation(), Ty,
+                            clang::diag::err_invalid_incomplete_type_use)) {
+        assert(false);
+        return NULL;
+    }
+
+    if (sema.RequireNonAbstractType(clang::SourceLocation(), Ty,
+                               clang::diag::err_allocation_of_abstract_type)) {
+        assert(false);
+        return NULL;
+    }
+
+    clang::InitializedEntity Entity = clang::InitializedEntity::InitializeTemporary(TInfo);
+    clang::InitializationKind Kind =
+        Exprs.size() ?  clang::InitializationKind::CreateDirect(clang::SourceLocation(), clang::SourceLocation(), clang::SourceLocation())
+        : clang::InitializationKind::CreateValue(clang::SourceLocation(), clang::SourceLocation(), clang::SourceLocation());
+    clang::InitializationSequence InitSeq(sema, Entity, Kind, Exprs);
+    Result = InitSeq.Perform(sema, Entity, Kind, Exprs);
+
+    assert(!Result.isInvalid());
+    return Result.get();
 }
 
 DLLEXPORT void *build_call_to_member(clang::Expr *MemExprE,clang::Expr **exprs, size_t nexprs)
@@ -626,6 +671,16 @@ DLLEXPORT void *CreateMemberExpr(clang::Expr *base, int isarrow, clang::ValueDec
 DLLEXPORT void *tovdecl(clang::Decl *D)
 {
     return dyn_cast<clang::ValueDecl>(D);
+}
+
+DLLEXPORT void *emitcppmembercallexpr(clang::CXXMemberCallExpr *E)
+{
+    return clang_cgf->EmitCXXMemberCallExpr(E,clang::CodeGen::ReturnValueSlot(NULL,false)).getScalarVal();   
+}
+
+DLLEXPORT void emitexprtomem(clang::Expr *E, llvm::Value *addr, int isInit)
+{
+    clang_cgf->EmitAnyExprToMem(E, addr, clang::Qualifiers(), isInit);
 }
 
 /*
@@ -785,7 +840,6 @@ DLLEXPORT Value *emit_cpp_call(void *cppfunc, Value **args, clang::Type **types,
         bool error = sema.GatherArgumentsForCall(clang::SourceLocation(),fdecl,FPT,0,
             llvm::ArrayRef<clang::Expr*>((clang::Expr**)&exprs,nparams),
             AllArgs,clang::Sema::VariadicDoesNotApply,false,false);
-        AllArgs[0]->dump();
         assert(!error);
     }
 
