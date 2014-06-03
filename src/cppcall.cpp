@@ -525,7 +525,7 @@ DLLEXPORT void emit_cpp_new(void *type)
     ty,false,0,NULL,OperatorNew,OperatorDelete);
 #endif
 
-    Value *ret = clang_cgf->EmitCXXNewExpr(dyn_cast<clang::CXXNewExpr>(sema.Owned(new (astctx) clang::CXXNewExpr(MD->getASTContext(),globalNew,OperatorNew,OperatorDelete,false,ArrayRef< clang::Expr * >(),
+    Value *ret = clang_cgf->EmitCXXNewExpr(new (astctx) clang::CXXNewExpr(MD->getASTContext(),globalNew,OperatorNew,OperatorDelete,false,ArrayRef< clang::Expr * >(),
         clang::SourceRange(),
         NULL,                       //Array Size
         clang::CXXNewExpr::NoInit,  //Initialization Style
@@ -546,7 +546,7 @@ DLLEXPORT void emit_cpp_new(void *type)
         NULL,                       //Type Source Info
         clang::SourceRange(),
         clang::SourceRange()
-        )).get()));
+        ));
 
     clang_cgf->Builder.CreateRet(clang_cgf->Builder.CreateBitCast(ret,clang_cgf->CurFn->getReturnType()));
 }
@@ -619,7 +619,7 @@ DLLEXPORT void *typeconstruct(clang::Type *t, clang::Expr **rawexprs, size_t nex
 
 DLLEXPORT void *build_call_to_member(clang::Expr *MemExprE,clang::Expr **exprs, size_t nexprs)
 {
-    return (void*)clang_compiler->getSema().BuildCallToMemberFunction(NULL,MemExprE,clang::SourceLocation(),clang::MultiExprArg(exprs,nexprs),clang::SourceLocation()).take();
+    return (void*)clang_compiler->getSema().BuildCallToMemberFunction(NULL,MemExprE,clang::SourceLocation(),clang::MultiExprArg(exprs,nexprs),clang::SourceLocation()).get();
 }
 
 DLLEXPORT void *CreateParmVarDecl(clang::Type *type)
@@ -990,7 +990,7 @@ DLLEXPORT void *createDeref(clang::Type *type, llvm::Value *value)
     clang::Expr *expr = clang::DeclRefExpr::Create(*clang_astcontext, clang::NestedNameSpecifierLoc(NULL,NULL), clang::SourceLocation(), 
         decl, false, clang::SourceLocation(), T, clang::VK_RValue);
 
-    return clang_compiler->getSema().CreateBuiltinUnaryOp(clang::SourceLocation(),clang::UO_Deref,expr).take();
+    return clang_compiler->getSema().CreateBuiltinUnaryOp(clang::SourceLocation(),clang::UO_Deref,expr).get();
 }
 
 DLLEXPORT void *clang_get_instance()
