@@ -361,7 +361,6 @@ ifeq ($(BUILD_LLDB), 1)
 	([ -d llvm-$(LLVM_VER)/tools/lldb ] && \
 		(cd llvm-$(LLVM_VER)/tools/lldb && \
 		git fetch))
-	cd llvm-$(LLVM_VER)/tools/lldb && git checkout origin/release_32
 endif
 ifeq ($(LLVM_VER),3.3)
 	patch -p0 < llvm-3.3.patch
@@ -397,6 +396,11 @@ endif
 $(LLVM_OBJ_TARGET): $(LLVM_OBJ_SOURCE) | $(llvm_python_workaround)
 	# LLVM has weird install prefixes (see llvm-$(LLVM_VER)/build_$(LLVM_BUILDTYPE)/Makefile.config for the full list)
 	# We map them here to the "normal" ones, which means just prefixing "PROJ_" to the variable name.
+	export PATH=$(abspath llvm-$(LLVM_VER)/python2_path):$$PATH && \
+	$(MAKE) -C llvm-$(LLVM_VER)/build_$(LLVM_BUILDTYPE) install $(MAKE_COMMON) PROJ_libdir=$(build_libdir) PROJ_bindir=$(build_bindir)
+	touch -c $@
+
+reinstall-llvm:
 	export PATH=$(abspath llvm-$(LLVM_VER)/python2_path):$$PATH && \
 	$(MAKE) -C llvm-$(LLVM_VER)/build_$(LLVM_BUILDTYPE) install $(MAKE_COMMON) PROJ_libdir=$(build_libdir) PROJ_bindir=$(build_bindir)
 	touch -c $@
