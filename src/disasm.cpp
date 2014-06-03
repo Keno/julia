@@ -212,7 +212,7 @@ void jl_dump_function_asm(void *Fptr, size_t Fsize,
 
     uint64_t nextLineAddr = -1;
 
-    if (lines_iter != lineinfo.end()) {
+    if (lines_iter != lines_end) {
         nextLineAddr = lines_iter->first;
         #ifdef LLVM35
         stream << "Filename: " << lines_iter->second.FileName << "\n";
