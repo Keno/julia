@@ -589,6 +589,12 @@ DLLEXPORT extern "C" void *construct_CXXTemporaryObjectExpr(void *d)
 }
  */
 
+DLLEXPORT int RequireCompleteType(clang::Type *t)
+{
+  clang::Sema &sema = clang_compiler->getSema();
+  return sema.RequireCompleteType(clang::SourceLocation(),clang::QualType(t,0),0);
+}
+
 DLLEXPORT void *typeconstruct(clang::Type *t, clang::Expr **rawexprs, size_t nexprs)
 {
     clang::QualType Ty(t,0);
@@ -693,9 +699,29 @@ DLLEXPORT void *tovdecl(clang::Decl *D)
     return dyn_cast<clang::ValueDecl>(D);
 }
 
-DLLEXPORT void *emitcppmembercallexpr(clang::CXXMemberCallExpr *E)
+DLLEXPORT void *cxxtmplt(clang::Decl *D)
 {
-    return clang_cgf->EmitCXXMemberCallExpr(E,clang::CodeGen::ReturnValueSlot(NULL,false)).getScalarVal();   
+  return dyn_cast<clang::ClassTemplateDecl>(D);
+}
+
+DLLEXPORT void *SpecializeClass(clang::ClassTemplateDecl *tmplt, clang::Type **types, size_t nargs)
+{
+  clang::TemplateArgument *targs = new clang::TemplateArgument[nargs];
+  for (size_t i = 0; i < nargs; ++i)
+    targs[i] = clang::TemplateArgument(clang::QualType(types[i],0));
+  void *InsertPos;
+  auto ret = tmplt->findSpecialization(targs,nargs,InsertPos);
+  delete[] targs;
+  return ret;
+}
+
+DLLEXPORT void *emitcppmembercallexpr(clang::CXXMemberCallExpr *E, llvm::Value *rslot)
+{
+    clang::CodeGen::RValue ret = clang_cgf->EmitCXXMemberCallExpr(E,clang::CodeGen::ReturnValueSlot(rslot,false));
+    if (ret.isScalar())
+      return ret.getScalarVal();
+    else
+      return ret.getAggregateAddr();
 }
 
 DLLEXPORT void emitexprtomem(clang::Expr *E, llvm::Value *addr, int isInit)
@@ -802,7 +828,7 @@ DLLEXPORT void *emit_field_ref(clang::Type *BaseType, Value *BaseVal, clang::Fie
     return LV.getAddress();
 }
 
-DLLEXPORT Value *emit_cpp_call(void *cppfunc, Value **args, clang::Type **types, size_t nargs, bool Forward, bool EmitReturn)
+DLLEXPORT Value *emit_cpp_call(void *cppfunc, Value **args, clang::Type **types, clang::Expr **xexprs, size_t nargs, bool Forward, bool EmitReturn)
 {
     clang::Decl* MD = ((clang::Decl *)cppfunc);
     clang::FunctionDecl* fdecl = dyn_cast<clang::FunctionDecl>(MD);
@@ -815,36 +841,41 @@ DLLEXPORT Value *emit_cpp_call(void *cppfunc, Value **args, clang::Type **types,
     size_t nparams = isMemberCall ? nargs-1 : nargs;
 
     clang::FunctionDecl::param_const_iterator it = fdecl->param_begin();
-    for ( int i = 0, j = 0; i < nparams; ++i )
-    {
-        clang::QualType T;
-        if (types[i] == NULL) {
-            while (j != i) {
-                ++j;
-                ++it;
+    if (xexprs == NULL) {
+        for ( int i = 0, j = 0; i < nparams; ++i )
+        {
+            clang::QualType T;
+            if (types[i] == NULL) {
+                while (j != i) {
+                    ++j;
+                    ++it;
+                }
+                T = (*it)->getOriginalType();
+            } else {
+                T = clang::QualType(types[i+isMemberCall],(unsigned)0);
             }
-            T = (*it)->getOriginalType();
-        } else {
-            T = clang::QualType(types[i+isMemberCall],(unsigned)0);
+
+            
+            decls[i] = clang::ParmVarDecl::Create(   
+                *clang_astcontext,
+                fdecl, // This is wrong, hopefully it doesn't matter
+                clang::SourceLocation(),
+                clang::SourceLocation(),
+                &clang_compiler->getPreprocessor().getIdentifierTable().getOwn("dummy"),
+                T,
+                clang_astcontext->getTrivialTypeSourceInfo(T),
+                clang::SC_None,NULL);
+
+            // Associate the value with this decl
+            clang_cgf->EmitParmDecl(*decls[i], clang_cgf->Builder.CreateBitCast(args[i+isMemberCall], 
+                clang_cgf->ConvertTypeForMem(T)), false, 0);
+
+            exprs[i] = clang::DeclRefExpr::Create(*clang_astcontext, clang::NestedNameSpecifierLoc(NULL,NULL), clang::SourceLocation(), 
+                decls[i], false, clang::SourceLocation(), T.getNonReferenceType(), clang::VK_LValue);
         }
-
-        
-        decls[i] = clang::ParmVarDecl::Create(   
-            *clang_astcontext,
-            fdecl, // This is wrong, hopefully it doesn't matter
-            clang::SourceLocation(),
-            clang::SourceLocation(),
-            &clang_compiler->getPreprocessor().getIdentifierTable().getOwn("dummy"),
-            T,
-            clang_astcontext->getTrivialTypeSourceInfo(T),
-            clang::SC_None,NULL);
-
-        // Associate the value with this decl
-        clang_cgf->EmitParmDecl(*decls[i], clang_cgf->Builder.CreateBitCast(args[i+isMemberCall], 
-            clang_cgf->ConvertTypeForMem(T)), false, 0);
-
-        exprs[i] = clang::DeclRefExpr::Create(*clang_astcontext, clang::NestedNameSpecifierLoc(NULL,NULL), clang::SourceLocation(), 
-            decls[i], false, clang::SourceLocation(), T.getNonReferenceType(), clang::VK_LValue);
+    } else {
+      for ( int i = 0, j = 0; i < nparams; ++i )
+        exprs[i] = xexprs[i];
     }
 
     const clang::CodeGen::CGFunctionInfo &cgfi = clang_cgt->arrangeFunctionDeclaration(fdecl);
@@ -989,6 +1020,11 @@ DLLEXPORT void *getPointerTo(clang::Type *t)
     return (void*)clang_astcontext->getPointerType(clang::QualType(t,0)).getTypePtr();
 }
 
+DLLEXPORT void *getReferenceTo(clang::Type *t)
+{
+    return (void*)clang_astcontext->getLValueReferenceType(clang::QualType(t,0)).getTypePtr();
+}
+
 DLLEXPORT void *createDeref(clang::Type *type, llvm::Value *value)
 {
     clang::QualType T(type,0);
@@ -1011,6 +1047,11 @@ DLLEXPORT void *createDeref(clang::Type *type, llvm::Value *value)
         decl, false, clang::SourceLocation(), T, clang::VK_RValue);
 
     return clang_compiler->getSema().CreateBuiltinUnaryOp(clang::SourceLocation(),clang::UO_Deref,expr).get();
+}
+
+DLLEXPORT void *createDerefExpr(clang::Expr *expr)
+{
+  return (void*)clang_compiler->getSema().CreateBuiltinUnaryOp(clang::SourceLocation(),clang::UO_Deref,expr).get();
 }
 
 DLLEXPORT void *clang_get_instance()
@@ -1069,12 +1110,16 @@ DLLEXPORT void *CreateConstGEP1_32(llvm::IRBuilder<false> *builder, llvm::Value 
     return (void*)builder->CreateConstGEP1_32(val,idx);
 }
 
-DLLEXPORT void *DeduceTemplateArguments(clang::FunctionTemplateDecl *tmplt)
+/*
+DeduceTemplateArguments (FunctionTemplateDecl *FunctionTemplate, TemplateArgumentListInfo *ExplicitTemplateArgs, ArrayRef< Expr * > Args, FunctionDecl *&Specialization, sema::TemplateDeductionInfo &Info)
+*/
+
+DLLEXPORT void *DeduceTemplateArguments(clang::FunctionTemplateDecl *tmplt, clang::Expr **args, uint32_t nargs)
 {
     clang::TemplateArgumentListInfo tali;
     clang::sema::TemplateDeductionInfo tdi((clang::SourceLocation()));
     clang::FunctionDecl *decl = NULL;
-    clang_compiler->getSema().DeduceTemplateArguments(tmplt, &tali, decl, tdi);
+    clang_compiler->getSema().DeduceTemplateArguments(tmplt, &tali, ArrayRef<clang::Expr *>(args,nargs), decl, tdi);
     return (void*) decl;
 }
 

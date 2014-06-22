@@ -2505,6 +2505,9 @@ function inlining_pass(e::Expr, sv, ast)
         if is_known_call(e, Core.Intrinsics.ccall, sv)
             i0 = 5
             isccall = true
+        elseif is_known_call(e, Core.Intrinsics.llvmcall, sv)
+            i0 = 5
+            isccall = false
         else
             i0 = 1
             isccall = false
