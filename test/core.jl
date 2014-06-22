@@ -353,6 +353,12 @@ glotest()
 @test glob_x == 88
 @test loc_x == 10
 
+# issue #7272
+@test expand(parse("let
+              global x = 2
+              local x = 1
+              end")) == Expr(:error, "variable \"x\" declared both local and global")
+
 # let - new variables, including undefinedness
 function let_undef()
     first = true
@@ -389,8 +395,17 @@ end
 @test a[2](10) == 12
 @test a[3](10) == 13
 
-# syntax
+# ? syntax
 @test (true ? 1 : false ? 2 : 3) == 1
+
+# issue #7252
+begin
+    local a
+    1 > 0 ? a=2 : a=3
+    @test a == 2
+    1 < 0 ? a=2 : a=3
+    @test a == 3
+end
 
 # tricky space sensitive syntax cases
 @test [-1 ~1] == [(-1) (~1)]
@@ -527,6 +542,22 @@ begin
     @test retfinally() == 5
     @test glo == 18
 end
+
+# issue #7307
+function test7307(a, ret)
+    try
+        try
+            ret && return a
+        finally
+            push!(a, "inner")
+        end
+    finally
+        push!(a, "outer")
+    end
+    return a
+end
+@test test7307({}, true) == {"inner","outer"}
+@test test7307({}, false) == {"inner","outer"}
 
 # chained and multiple assignment behavior (issue #2913)
 begin
@@ -1723,3 +1754,10 @@ f7062{t,n}(::Type{Array{t}}  , ::Array{t,n}) = (t,n,1)
 f7062{t,n}(::Type{Array{t,n}}, ::Array{t,n}) = (t,n,2)
 @test f7062(Array{Int,1}, [1,2,3]) === (Int,1,2)
 @test f7062(Array{Int}  , [1,2,3]) === (Int,1,1)
+
+# issue #7302
+function test7302()
+    t = [Uint64][1]
+    convert(t, "5")
+end
+@test_throws MethodError test7302()

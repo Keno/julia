@@ -3984,6 +3984,10 @@ extern "C" DLLEXPORT jl_value_t *jl_new_box(jl_value_t *v)
     return box;
 }
 
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR == 3 && SYSTEM_LLVM
+#define INSTCOMBINE_BUG
+#endif
+
 static void init_julia_llvm_env(Module *m)
 {
     MDNode* tbaa_root = mbuilder->createTBAARoot("jtbaa");
@@ -4405,14 +4409,20 @@ static void init_julia_llvm_env(Module *m)
     FPM->add(createCFGSimplificationPass()); // Clean up disgusting code
     FPM->add(createPromoteMemoryToRegisterPass());// Kill useless allocas
     
+#ifndef INSTCOMBINE_BUG
     FPM->add(createInstructionCombiningPass()); // Cleanup for scalarrepl.
+#endif
     FPM->add(createScalarReplAggregatesPass()); // Break up aggregate allocas
+#ifndef INSTCOMBINE_BUG
     FPM->add(createInstructionCombiningPass()); // Cleanup for scalarrepl.
+#endif
     FPM->add(createJumpThreadingPass());        // Thread jumps.
     // NOTE: CFG simp passes after this point seem to hurt native codegen.
     // See issue #6112. Should be re-evaluated when we switch to MCJIT.
     //FPM->add(createCFGSimplificationPass());    // Merge & remove BBs
+#ifndef INSTCOMBINE_BUG
     FPM->add(createInstructionCombiningPass()); // Combine silly seq's
+#endif
     
     //FPM->add(createCFGSimplificationPass());    // Merge & remove BBs
     FPM->add(createReassociatePass());          // Reassociate expressions
@@ -4430,16 +4440,20 @@ static void init_julia_llvm_env(Module *m)
     FPM->add(createLICMPass());                 // Hoist loop invariants
     FPM->add(createLoopUnswitchPass());         // Unswitch loops.
     // Subsequent passes not stripping metadata from terminator
-    FPM->add(createInstructionCombiningPass()); 
+#ifndef INSTCOMBINE_BUG
+    FPM->add(createInstructionCombiningPass());
+#endif
     FPM->add(createIndVarSimplifyPass());       // Canonicalize indvars
     FPM->add(createLoopDeletionPass());         // Delete dead loops
     FPM->add(createLoopUnrollPass());           // Unroll small loops
     //FPM->add(createLoopStrengthReducePass());   // (jwb added)
     
-#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 3
+#if LLVM_VERSION_MAJOR == 3 && LLVM_VERSION_MINOR >= 3 && !defined(INSTCOMBINE_BUG)
     FPM->add(createLoopVectorizePass());        // Vectorize loops
 #endif
+#ifndef INSTCOMBINE_BUG
     FPM->add(createInstructionCombiningPass()); // Clean up after the unroller
+#endif
     FPM->add(createGVNPass());                  // Remove redundancies
     //FPM->add(createMemCpyOptPass());            // Remove memcpy / form memset  
     FPM->add(createSCCPPass());                 // Constant prop with SCCP
@@ -4448,7 +4462,9 @@ static void init_julia_llvm_env(Module *m)
     // opened up by them.
     FPM->add(createSinkingPass()); ////////////// ****
     FPM->add(createInstructionSimplifierPass());///////// ****
+#ifndef INSTCOMBINE_BUG
     FPM->add(createInstructionCombiningPass());
+#endif
     FPM->add(createJumpThreadingPass());         // Thread jumps
     FPM->add(createDeadStoreEliminationPass());  // Delete dead stores
 

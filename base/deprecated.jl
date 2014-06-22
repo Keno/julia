@@ -185,16 +185,7 @@ end
 @deprecate svdfact(A,thin)      svdfact(A,thin=thin)
 @deprecate svdfact!(A,thin)     svdfact(A,thin=thin)
 @deprecate svd(A,thin)          svd(A,thin=thin)
-# Note: These methods need a more helpfull error message than a `NoMethodError`,
-#       when the deprecation is removed
-@deprecate (+)(A::Array{Bool},x::Bool)      A .+ x
-@deprecate (+)(x::Bool,A::Array{Bool})      x .+ A 
-@deprecate (-)(A::Array{Bool},x::Bool)      A .- x
-@deprecate (-)(x::Bool,A::Array{Bool})      x .- A
-@deprecate (+)(A::Array,x::Number)          A .+ x
-@deprecate (+)(x::Number,A::Array)          x .+ A
-@deprecate (-)(A::Array,x::Number)          A .- x
-@deprecate (-)(x::Number,A::Array)          x .- A
+
 @deprecate (/)(x::Number,A::Array)          x ./ A
 @deprecate (\)(A::Array,x::Number)          A .\ x
 
@@ -464,8 +455,18 @@ Set{T<:Number}(xs::T...) = Set{T}(xs)
 @deprecate readsfrom(cmd, args...)      open(cmd, "r", args...)
 @deprecate writesto(cmd, args...)      open(cmd, "w", args...)
 
+function tty_rows()
+    depwarn("tty_rows() is deprecated, use tty_size() instead", :tty_rows)
+    tty_size()[1]
+end
+function tty_cols()
+    depwarn("tty_cols() is deprecated, use tty_size() instead", :tty_cols)
+    tty_size()[2]
+end
+
 # 0.3 discontinued functions
 
 scale!{T<:Base.LinAlg.BlasReal}(X::Array{T}, s::Complex) = error("scale!: Cannot scale a real array by a complex value in-place.  Use scale(X::Array{Real}, s::Complex) instead.")
 
 @deprecate which(f::Callable, args...) @which f(args...)
+@deprecate rmdir rm

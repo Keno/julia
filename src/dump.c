@@ -43,9 +43,6 @@ static jl_value_t *jl_idtable_type=NULL;
 // queue of types to cache
 static jl_array_t *datatype_list=NULL;
 
-// queue of modules to initialize
-static arraylist_t modules_to_init;
-
 #define write_uint8(s, n) ios_putc((n), (s))
 #define read_uint8(s) ((uint8_t)ios_getc(s))
 #define write_int8(s, n) write_uint8(s, n)
@@ -127,13 +124,13 @@ static void jl_load_sysimg_so(char *fname)
             if (saved_cpuid != (((uint64_t)info[2])|(((uint64_t)info[3])<<32)))
                 jl_error("Target architecture mismatch. Please delete or regenerate sys.{so,dll,dylib}.");
         }
-        else if(strcmp(cpu_target,"core2") == 0) {
+        else if (strcmp(cpu_target,"core2") == 0) {
             int HasSSSE3 = (info[3] & 1<<9);
             if (!HasSSSE3)
                 jl_error("The current host does not support SSSE3, but the system image was compiled for Core2.\n"
                          "Please delete or regenerate sys.{so,dll,dylib}.");
         }
-        else if(strcmp(cpu_target,"i386") != 0) {
+        else if (strcmp(cpu_target,"i386") != 0) {
             jl_error("System image has unknown target cpu architecture.\n"
                      "Please delete or regenerate sys.{so,dll,dylib}.");
         }
@@ -867,8 +864,6 @@ static jl_value_t *jl_deserialize_value_internal(ios_t *s)
             arraylist_push(&m->usings, jl_deserialize_value(s));
         }
         m->constant_table = (jl_array_t*)jl_deserialize_value(s);
-        if (jl_module_has_initializer(m))
-            arraylist_push(&modules_to_init, m);
         return (jl_value_t*)m;
     }
     else if (vtag == (jl_value_t*)SmallInt64_tag) {
@@ -965,6 +960,8 @@ static jl_value_t* jl_deserialize_value(ios_t *s)
 
 // --- entry points ---
 
+extern jl_array_t *jl_module_init_order;
+
 DLLEXPORT
 void jl_save_system_image(char *fname)
 {
@@ -1012,6 +1009,17 @@ void jl_save_system_image(char *fname)
     jl_serialize_gv_syms(&f, jl_get_root_symbol()); // serialize symbols with GlobalValue references
     jl_serialize_value(&f, NULL); // signal the end of the symbols list
 
+    // save module initialization order
+    if (jl_module_init_order != NULL) {
+        for(i=0; i < jl_array_len(jl_module_init_order); i++) {
+            // NULL out any modules that weren't saved
+            jl_value_t *mod = jl_cellref(jl_module_init_order, i);
+            if (ptrhash_get(&backref_table, mod) == HT_NOTFOUND)
+                jl_cellset(jl_module_init_order, i, NULL);
+        }
+    }
+    jl_serialize_value(&f, jl_module_init_order);
+
     write_int32(&f, jl_get_t_uid_ctr());
     write_int32(&f, jl_get_gs_ctr());
     htable_reset(&backref_table, 0);
@@ -1024,7 +1032,7 @@ extern jl_function_t *jl_typeinf_func;
 extern int jl_boot_file_loaded;
 extern void jl_get_builtin_hooks(void);
 extern void jl_get_system_hooks(void);
-extern void jl_get_uv_hooks(int);
+extern void jl_get_uv_hooks();
 
 DLLEXPORT
 void jl_restore_system_image(char *fname)
@@ -1077,6 +1085,8 @@ void jl_restore_system_image(char *fname)
     jl_deserialize_globalvals(&f);
     jl_deserialize_gv_syms(&f);
 
+    jl_module_init_order = (jl_array_t*)jl_deserialize_value(&f);
+
     // cache builtin parametric types
     for(int i=0; i < jl_array_len(datatype_list); i++) {
         jl_value_t *v = jl_cellref(datatype_list, i);
@@ -1087,7 +1097,7 @@ void jl_restore_system_image(char *fname)
 
     jl_get_builtin_hooks();
     jl_get_system_hooks();
-    jl_get_uv_hooks(1);
+    jl_get_uv_hooks();
     jl_boot_file_loaded = 1;
     jl_typeinf_func = (jl_function_t*)jl_get_global(jl_base_module,
                                                     jl_symbol("typeinf_ext"));
@@ -1111,8 +1121,17 @@ void jl_restore_system_image(char *fname)
 
 void jl_init_restored_modules()
 {
-    while (modules_to_init.len > 0) {
-        jl_module_run_initializer((jl_module_t *) arraylist_pop(&modules_to_init));
+    if (jl_module_init_order != NULL) {
+        jl_array_t *temp = jl_module_init_order;
+        jl_module_init_order = NULL;
+        JL_GC_PUSH1(&temp);
+        int i;
+        for(i=0; i < jl_array_len(temp); i++) {
+            jl_value_t *mod = jl_cellref(temp, i);
+            jl_module_run_initializer((jl_module_t*)mod);
+        }
+        jl_module_init_order = NULL;
+        JL_GC_POP();
     }
 }
 
@@ -1196,7 +1215,6 @@ void jl_init_serializer(void)
     htable_new(&fptr_to_id, 0);
     htable_new(&id_to_fptr, 0);
     htable_new(&backref_table, 50000);
-    arraylist_new(&modules_to_init, 0);
 
     void *tags[] = { jl_symbol_type, jl_datatype_type,
                      jl_function_type, jl_tuple_type, jl_array_type,
