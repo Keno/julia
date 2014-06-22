@@ -519,7 +519,7 @@ function builtin_tfunction(f::ANY, args::ANY, argtypes::ANY)
         return None
     end
     if is(f,typeassert) || is(f,tupleref) || is(f,getfield) ||
-       is(f,apply_type) || is(f,fieldtype) #|| is(f,Base.Intrinsics.llvmcall)
+       is(f,apply_type) || is(f,fieldtype) || is(f,Base.Intrinsics.llvmcall)
         # TODO: case of apply(), where we do not have the args
         return tf[3](args, argtypes...)
     end
@@ -1871,7 +1871,7 @@ function is_pure_builtin(f)
         if !(f === Intrinsics.pointerref || # this one is volatile
              f === Intrinsics.pointerset || # this one is never effect-free
              f === Intrinsics.ccall ||      # this one is never effect-free
-#             f === Intrinsics.llvmcall ||      # this one is never effect-free
+             f === Intrinsics.llvmcall ||      # this one is never effect-free
              f === Intrinsics.jl_alloca ||  # this one is volatile, TODO: possibly also effect-free?
              f === Intrinsics.pointertoref) # this one is volatile
             return true

@@ -43,26 +43,28 @@ static DataLayout *TD;
 
 static llvm::Module *clang_shadow_module;
 
-// clang types
-static clang::CanQualType cT_int1;
-static clang::CanQualType cT_int8;
-static clang::CanQualType cT_uint8;
-static clang::CanQualType cT_int16;
-static clang::CanQualType cT_uint16;
-static clang::CanQualType cT_int32;
-static clang::CanQualType cT_uint32;
-static clang::CanQualType cT_int64;
-static clang::CanQualType cT_uint64;
-static clang::CanQualType cT_char;
-static clang::CanQualType cT_size;
-static clang::CanQualType cT_int128;
-static clang::CanQualType cT_uint128;
-static clang::CanQualType cT_complex64;
-static clang::CanQualType cT_complex128;
-static clang::CanQualType cT_float32;
-static clang::CanQualType cT_float64;
-static clang::CanQualType cT_void;
-static clang::CanQualType cT_pvoid;
+extern "C" {
+  // clang types
+  DLLEXPORT const clang::Type *cT_int1;
+  DLLEXPORT const clang::Type *cT_int8;
+  DLLEXPORT const clang::Type *cT_uint8;
+  DLLEXPORT const clang::Type *cT_int16;
+  DLLEXPORT const clang::Type *cT_uint16;
+  DLLEXPORT const clang::Type *cT_int32;
+  DLLEXPORT const clang::Type *cT_uint32;
+  DLLEXPORT const clang::Type *cT_int64;
+  DLLEXPORT const clang::Type *cT_uint64;
+  DLLEXPORT const clang::Type *cT_char;
+  DLLEXPORT const clang::Type *cT_size;
+  DLLEXPORT const clang::Type *cT_int128;
+  DLLEXPORT const clang::Type *cT_uint128;
+  DLLEXPORT const clang::Type *cT_complex64;
+  DLLEXPORT const clang::Type *cT_complex128;
+  DLLEXPORT const clang::Type *cT_float32;
+  DLLEXPORT const clang::Type *cT_float64;
+  DLLEXPORT const clang::Type *cT_void;
+  DLLEXPORT const clang::Type *cT_pvoid;
+}
 
 static bool in_cpp = false;
 
@@ -198,31 +200,43 @@ void myParseAST(clang::Sema &S, bool PrintStats, bool SkipFunctionBodies) {
   }
 }
 
+static inline void add_directory(clang::Preprocessor &pp, clang::FileManager &fm, clang::SrcMgr::CharacteristicKind flag, const char *dirname)
+{
+  auto dir = fm.getDirectory(dirname);
+  if (dir == NULL)
+    JL_PRINTF(JL_STDERR,"WARNING: Could not add directory %s to clang search path!\n",dirname);
+  else
+    pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(dir,flag,false),flag == clang::SrcMgr::C_System || flag == clang::SrcMgr::C_ExternCSystem);
+
+}
+
 DLLEXPORT void init_header(char *name)
 {
     clang::FileManager &fm = clang_compiler->getFileManager();
     clang::Preprocessor &pp = clang_compiler->getPreprocessor();
-    clang::HeaderSearchOptions &opts = pp.getHeaderSearchInfo().getHeaderSearchOpts();
-    opts.UseBuiltinIncludes = 1;
-    opts.UseStandardSystemIncludes = 1;
-    opts.UseStandardCXXIncludes = 1;
+    /*clang::HeaderSearchOptions &opts = pp.getHeaderSearchInfo().getHeaderSearchOpts();
+    opts.UseBuiltinIncludes = 0;
+    opts.UseStandardSystemIncludes = 0;
+    opts.UseStandardCXXIncludes = 0;
+    opts.UseLibcxx = 1;
+    opts.Verbose = 1;*/
     #define DIR(X) pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory(X),clang::SrcMgr::C_User,false),false);
     #ifdef OS_LINUX
-    pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory("/usr/include/c++/4.8"),clang::SrcMgr::C_System,false),true);
-    pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory("/usr/include/x86_64-linux-gnu/c++/4.8/"),clang::SrcMgr::C_System,false),true);
-    pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory("/home/kfischer/julia/usr/lib/clang/3.5/include/"),clang::SrcMgr::C_System,false),true);
-    DIR("/home/kfischer/julia/src/support")
-    DIR("/home/kfischer/julia/usr/include")
-    DIR("/home/kfischer/julia/deps/llvm-svn/tools/clang/")
-    DIR("/home/kfischer/julia/deps/llvm-svn/tools/clang/include/")
+    add_directory(pp,fm,clang::SrcMgr::C_System,"/usr/include/c++/4.8");
+    add_directory(pp,fm,clang::SrcMgr::C_System,"/usr/include/x86_64-linux-gnu/c++/4.8/");
+    add_directory(pp,fm,clang::SrcMgr::C_System,"/home/kfischer/julia/usr/lib/clang/3.5/include/");
+    add_directory(pp,fm,clang::SrcMgr::C_User,"/home/kfischer/julia/src/support/");
+    add_directory(pp,fm,clang::SrcMgr::C_User,"/home/kfischer/julia/usr/include/");
+    add_directory(pp,fm,clang::SrcMgr::C_User,"/home/kfischer/julia/deps/llvm-svn/tools/clang/");
+    add_directory(pp,fm,clang::SrcMgr::C_User,"/home/kfischer/julia/deps/llvm-svn/tools/clang/include/");
     #else 
-    pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory("/usr/include"),clang::SrcMgr::C_System,false),true);
-    pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory("/Users/kfischer/julia/deps/llvm-3.3/projects/libcxx/include/"),clang::SrcMgr::C_System,false),true);
-    pp.getHeaderSearchInfo().AddSearchPath(clang::DirectoryLookup(fm.getDirectory("/Users/kfischer/julia/usr/lib/clang/3.5/include/"),clang::SrcMgr::C_System,false),true);
-    DIR("/Users/kfischer/julia-upstream/src/support")
-    DIR("/Users/kfischer/julia-upstream/usr/include")
-    DIR("/Users/kfischer/julia-upstream/deps/llvm-svn/tools/clang/")
-    DIR("/Users/kfischer/julia-upstream/deps/llvm-svn/tools/clang/include/")
+    //add_directory(pp,fm,clang::SrcMgr::C_System,"/usr/include");
+    add_directory(pp,fm,clang::SrcMgr::C_ExternCSystem,"/Users/kfischer/julia-upstream/usr/lib/clang/3.5.0/include/");
+    add_directory(pp,fm,clang::SrcMgr::C_ExternCSystem,"/Users/kfischer/julia/deps/llvm-3.3/projects/libcxx/include/");
+    //add_directory(pp,fm,clang::SrcMgr::C_User,"/Users/kfischer/julia-upstream/src/support");
+    add_directory(pp,fm,clang::SrcMgr::C_User,"/Users/kfischer/julia-upstream/usr/include");
+    add_directory(pp,fm,clang::SrcMgr::C_User,"/Users/kfischer/julia-upstream/deps/llvm-svn/tools/clang/");
+    add_directory(pp,fm,clang::SrcMgr::C_User,"/Users/kfischer/julia-upstream/deps/llvm-svn/tools/clang/include/");
     #endif
     clang_compiler->getDiagnosticClient().BeginSourceFile(clang_compiler->getLangOpts(), 0);
     pp.getBuiltinInfo().InitializeBuiltins(pp.getIdentifierTable(),
@@ -245,6 +259,10 @@ DLLEXPORT void init_julia_clang_env() {
     clang_compiler->getLangOpts().WChar = 1;
     clang_compiler->getLangOpts().C99 = 1;
     clang_compiler->getLangOpts().ImplicitInt = 0;
+    clang_compiler->getHeaderSearchOpts().UseBuiltinIncludes = 1;
+    clang_compiler->getHeaderSearchOpts().UseLibcxx = 1;
+    clang_compiler->getHeaderSearchOpts().UseStandardSystemIncludes = 1;
+    clang_compiler->getHeaderSearchOpts().UseStandardCXXIncludes = 1;
     clang_compiler->getCodeGenOpts().setDebugInfo(clang::CodeGenOptions::NoDebugInfo);
     clang_compiler->getTargetOpts().Triple = "x86_64-apple-darwin12.4.0";
     clang::TargetInfo *tin = clang::TargetInfo::CreateTargetInfo(clang_compiler->getDiagnostics(), &clang_compiler->getTargetOpts());
@@ -264,35 +282,37 @@ DLLEXPORT void init_julia_clang_env() {
         *clang_shadow_module,
         *TD,
         clang_compiler->getDiagnostics());
-    clang_cgt = new clang::CodeGen::CodeGenTypes(*clang_cgm);
+    clang_cgt = &(clang_cgm->getTypes());
     clang_cgf = new clang::CodeGen::CodeGenFunction(*clang_cgm);
-    
-    cT_int1  = clang_astcontext->BoolTy;
-    cT_int8  = clang_astcontext->SignedCharTy;
-    cT_uint8 = clang_astcontext->UnsignedCharTy;
-    cT_int16 = clang_astcontext->ShortTy;
-    cT_uint16 = clang_astcontext->UnsignedShortTy;
-    cT_int32 = clang_astcontext->IntTy;
-    cT_uint32 = clang_astcontext->UnsignedIntTy;
-    cT_char = clang_astcontext->IntTy;
+    clang_cgf->CurFuncDecl = NULL;
+    clang_cgf->CurCodeDecl = NULL;
+
+    cT_int1  = clang_astcontext->BoolTy.getTypePtrOrNull();
+    cT_int8  = clang_astcontext->SignedCharTy.getTypePtrOrNull();
+    cT_uint8 = clang_astcontext->UnsignedCharTy.getTypePtrOrNull();
+    cT_int16 = clang_astcontext->ShortTy.getTypePtrOrNull();
+    cT_uint16 = clang_astcontext->UnsignedShortTy.getTypePtrOrNull();
+    cT_int32 = clang_astcontext->IntTy.getTypePtrOrNull();
+    cT_uint32 = clang_astcontext->UnsignedIntTy.getTypePtrOrNull();
+    cT_char = clang_astcontext->IntTy.getTypePtrOrNull();
 #ifdef __LP64__
-    cT_int64 = clang_astcontext->LongTy;
-    cT_uint64 = clang_astcontext->UnsignedLongTy;
+    cT_int64 = clang_astcontext->LongTy.getTypePtrOrNull();
+    cT_uint64 = clang_astcontext->UnsignedLongTy.getTypePtrOrNull();
 #else
-    cT_int64 = clang_astcontext->LongLongTy;
-    cT_uint64 = clang_astcontext->UnsignedLongLongTy;
+    cT_int64 = clang_astcontext->LongLongTy.getTypePtrOrNull();
+    cT_uint64 = clang_astcontext->UnsignedLongLongTy.getTypePtrOrNull();
 #endif
-    cT_size = clang_astcontext->getSizeType();
-    cT_int128 = clang_astcontext->Int128Ty;
-    cT_uint128 = clang_astcontext->UnsignedInt128Ty;
-    cT_complex64 = clang_astcontext->FloatComplexTy;
-    cT_complex128 = clang_astcontext->DoubleComplexTy;
+    cT_size = clang_astcontext->getSizeType().getTypePtrOrNull();
+    cT_int128 = clang_astcontext->Int128Ty.getTypePtrOrNull();
+    cT_uint128 = clang_astcontext->UnsignedInt128Ty.getTypePtrOrNull();
+    cT_complex64 = clang_astcontext->FloatComplexTy.getTypePtrOrNull();
+    cT_complex128 = clang_astcontext->DoubleComplexTy.getTypePtrOrNull();
 
-    cT_float32 = clang_astcontext->FloatTy;
-    cT_float64 = clang_astcontext->DoubleTy;
-    cT_void = clang_astcontext->VoidTy;
+    cT_float32 = clang_astcontext->FloatTy.getTypePtrOrNull();
+    cT_float64 = clang_astcontext->DoubleTy.getTypePtrOrNull();
+    cT_void = clang_astcontext->VoidTy.getTypePtrOrNull();
 
-    cT_pvoid = clang_astcontext->getPointerType(cT_void);
+    cT_pvoid = clang_astcontext->getPointerType(clang_astcontext->VoidTy).getTypePtrOrNull();
 }
 
 static llvm::Module *cur_module = NULL;
@@ -642,9 +662,9 @@ DLLEXPORT void AssociateValue(clang::Decl *d, clang::Type *type, llvm::Value *V)
 {
     clang::VarDecl *vd = dyn_cast<clang::VarDecl>(d);
     clang::QualType T(type,0);
+    llvm::Type *Ty = clang_cgf->ConvertTypeForMem(T);
     // Associate the value with this decl
-    clang_cgf->EmitParmDecl(*vd, clang_cgf->Builder.CreateBitCast(V, 
-        clang_cgf->ConvertTypeForMem(T)), false, 0);
+    clang_cgf->EmitParmDecl(*vd, clang_cgf->Builder.CreateBitCast(V, Ty), false, 0);
 }
 
 DLLEXPORT void *CreateDeclRefExpr(clang::ValueDecl *D, clang::Type *type)
@@ -1033,5 +1053,29 @@ DLLEXPORT void cdump(void *decl)
     ((clang::Decl*) decl)->dump();
 }
 
+DLLEXPORT void *tollvmty(clang::Type *p)
+{
+    clang::QualType T(p,0);
+    return (void*)clang_cgf->ConvertTypeForMem(T);
+}
+
+DLLEXPORT void *createLoad(llvm::IRBuilder<false> *builder, llvm::Value *val)
+{
+    return builder->CreateLoad(val);
+}
+
+DLLEXPORT void *CreateConstGEP1_32(llvm::IRBuilder<false> *builder, llvm::Value *val, uint32_t idx)
+{
+    return (void*)builder->CreateConstGEP1_32(val,idx);
+}
+
+DLLEXPORT void *DeduceTemplateArguments(clang::FunctionTemplateDecl *tmplt)
+{
+    clang::TemplateArgumentListInfo tali;
+    clang::sema::TemplateDeductionInfo tdi((clang::SourceLocation()));
+    clang::FunctionDecl *decl = NULL;
+    clang_compiler->getSema().DeduceTemplateArguments(tmplt, &tali, decl, tdi);
+    return (void*) decl;
+}
 
 }

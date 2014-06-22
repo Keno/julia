@@ -477,10 +477,10 @@ typedef struct {
 } jl_codectx_t;
 
 static Value *emit_expr(jl_value_t *expr, jl_codectx_t *ctx, bool boxed=true,
-                        bool valuepos=true);
+                        bool valuepos=true, jl_sym_t **valuevar=NULL);
 static Value *emit_unboxed(jl_value_t *e, jl_codectx_t *ctx);
 static int is_global(jl_sym_t *s, jl_codectx_t *ctx);
-static Value *make_gcroot(Value *v, jl_codectx_t *ctx);
+static Value *make_gcroot(Value *v, jl_codectx_t *ctx, jl_sym_t *var = NULL);
 static Value *global_binding_pointer(jl_module_t *m, jl_sym_t *s,
                                      jl_binding_t **pbnd, bool assign);
 static Value *emit_checked_var(Value *bp, jl_sym_t *name, jl_codectx_t *ctx);
@@ -571,7 +571,7 @@ static Function *to_function(jl_lambda_info_t *li, bool cstyle)
         abort();
     }
 #endif
-    FPM->run(*f);
+    //FPM->run(*f);
     //n_compile++;
     // print out the function's LLVM code
     //ios_printf(ios_stderr, "%s:%d\n",
@@ -1149,13 +1149,21 @@ static void simple_escape_analysis(jl_value_t *expr, bool esc, jl_codectx_t *ctx
 
 // --- gc root utils ---
 
-static Value *make_gcroot(Value *v, jl_codectx_t *ctx)
+static Value *make_gcroot(Value *v, jl_codectx_t *ctx, jl_sym_t *var)
 {
     Value *froot = builder.CreateGEP(ctx->argTemp,
                                      ConstantInt::get(T_size,
                                                       ctx->argSpaceOffs +
                                                       ctx->argDepth));
     builder.CreateStore(v, froot);
+    if (var != NULL)
+    {
+        std::map<jl_sym_t *, jl_varinfo_t>::iterator it = ctx->vars.find(var);
+        if (it != ctx->vars.end() && ((llvm::MDNode*)it->second.dinfo) != NULL)
+        {
+            ctx->dbuilder->insertDeclare(froot, it->second.dinfo, builder.GetInsertBlock());
+        }
+    }
     ctx->argDepth++;
     if (ctx->argDepth > ctx->maxDepth)
         ctx->maxDepth = ctx->argDepth;
@@ -2138,9 +2146,10 @@ static Value *emit_jlcall(Value *theFptr, Value *theF, jl_value_t **args,
     // emit arguments
     int argStart = ctx->argDepth;
     for(size_t i=0; i < nargs; i++) {
-        Value *anArg = emit_expr(args[i], ctx);
+        jl_sym_t *sym = NULL;
+        Value *anArg = emit_expr(args[i], ctx, true, true, &sym);
         // put into argument space
-        make_gcroot(boxed(anArg, ctx, expr_type(args[i],ctx)), ctx);
+        make_gcroot(boxed(anArg, ctx, expr_type(args[i],ctx)), ctx, sym);
     }
 
     // call
@@ -2502,15 +2511,21 @@ static Value *emit_condition(jl_value_t *cond, const std::string &msg, jl_codect
 }
 
 static Value *emit_expr(jl_value_t *expr, jl_codectx_t *ctx, bool isboxed,
-                        bool valuepos)
+                        bool valuepos, jl_sym_t **valuevar)
 {
     if (jl_is_symbol(expr)) {
         if (!valuepos) return NULL;
-        return emit_var((jl_sym_t*)expr, (jl_value_t*)jl_undef_type, ctx, isboxed);
+        jl_sym_t *sym = (jl_sym_t*)expr;
+        if (valuevar != NULL)
+            *valuevar = sym;
+        return emit_var(sym, (jl_value_t*)jl_undef_type, ctx, isboxed);
     }
     if (jl_is_symbolnode(expr)) {
         if (!valuepos) return NULL;
-        return emit_var(jl_symbolnode_sym(expr), jl_symbolnode_type(expr), ctx, isboxed);
+        jl_sym_t *sym = jl_symbolnode_sym(expr);
+        if (valuevar != NULL)
+            *valuevar = sym;
+        return emit_var(sym, jl_symbolnode_type(expr), ctx, isboxed);
     }
     else if (jl_is_labelnode(expr)) {
         int labelname = jl_labelnode_label(expr);
@@ -3711,6 +3726,8 @@ static Function *emit_function(jl_lambda_info_t *lam, bool cstyle)
             else {
                 // if this argument hasn't been given space yet, we've decided
                 // to leave it in the input argument array.
+                dbuilder.insertDbgValueIntrinsic(theArg,0,ctx.vars[s].dinfo,builder.GetInsertBlock());
+                //dbuilder.insertDeclare(argPtr, ctx.vars[s].dinfo, builder.GetInsertBlock());
                 ctx.vars[s].passedAs = theArg;
             }
         }
@@ -4486,7 +4503,7 @@ extern "C" void jl_init_codegen(void)
     //options.PrintMachineCode = true; //Print machine code produced during JIT compiling
 #ifdef JL_DEBUG_BUILD
     options.JITEmitDebugInfo = true;
-#endif 
+#endif
     options.NoFramePointerElim = true;
 #ifndef LLVM34
     options.NoFramePointerElimNonLeaf = true;
@@ -4539,6 +4556,7 @@ extern "C" void jl_init_codegen(void)
     jl_TargetMachine = eb.selectTarget(TheTriple,"",jl_cpu_string,MAttrs);
 #endif
     assert(jl_TargetMachine);
+    jl_TargetMachine->setOptLevel(CodeGenOpt::None);
     jl_ExecutionEngine = eb.create(jl_TargetMachine);
 #endif // LLVM VERSION
     jl_ExecutionEngine->DisableLazyCompilation();
