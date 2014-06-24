@@ -41,7 +41,7 @@ static clang::CodeGen::CodeGenTypes *clang_cgt;
 static clang::CodeGen::CodeGenFunction *clang_cgf;
 static DataLayout *TD;
 
-static llvm::Module *clang_shadow_module;
+DLLEXPORT llvm::Module *clang_shadow_module;
 
 extern "C" {
   // clang types
@@ -55,6 +55,7 @@ extern "C" {
   DLLEXPORT const clang::Type *cT_int64;
   DLLEXPORT const clang::Type *cT_uint64;
   DLLEXPORT const clang::Type *cT_char;
+  DLLEXPORT const clang::Type *cT_cchar;
   DLLEXPORT const clang::Type *cT_size;
   DLLEXPORT const clang::Type *cT_int128;
   DLLEXPORT const clang::Type *cT_uint128;
@@ -288,6 +289,7 @@ DLLEXPORT void init_julia_clang_env() {
     clang_cgf->CurCodeDecl = NULL;
 
     cT_int1  = clang_astcontext->BoolTy.getTypePtrOrNull();
+    cT_cchar = clang_astcontext->CharTy.getTypePtrOrNull();
     cT_int8  = clang_astcontext->SignedCharTy.getTypePtrOrNull();
     cT_uint8 = clang_astcontext->UnsignedCharTy.getTypePtrOrNull();
     cT_int16 = clang_astcontext->ShortTy.getTypePtrOrNull();
@@ -611,10 +613,12 @@ DLLEXPORT void *typeconstruct(clang::Type *t, clang::Expr **rawexprs, size_t nex
     }
   
     clang::ExprResult Result;
+    clang::SourceManager &sm = clang_compiler->getSourceManager();
 
     if (Exprs.size() == 1) {
         clang::Expr *Arg = Exprs[0];
-        Result = sema.BuildCXXFunctionalCastExpr(TInfo, clang::SourceLocation(), Arg, clang::SourceLocation());
+        Result = sema.BuildCXXFunctionalCastExpr(TInfo, sm.getLocForStartOfFile(sm.getMainFileID()),
+          Arg, sm.getLocForStartOfFile(sm.getMainFileID()));
         assert(!Result.isInvalid());
         return Result.get();
     }
@@ -669,6 +673,8 @@ DLLEXPORT void AssociateValue(clang::Decl *d, clang::Type *type, llvm::Value *V)
     clang::VarDecl *vd = dyn_cast<clang::VarDecl>(d);
     clang::QualType T(type,0);
     llvm::Type *Ty = clang_cgf->ConvertTypeForMem(T);
+    if (type == cT_int1)
+      V = clang_cgf->Builder.CreateZExt(V, Ty);
     // Associate the value with this decl
     clang_cgf->EmitParmDecl(*vd, clang_cgf->Builder.CreateBitCast(V, Ty), false, 0);
 }
@@ -866,7 +872,7 @@ DLLEXPORT Value *emit_cpp_call(void *cppfunc, Value **args, clang::Type **types,
                 clang_astcontext->getTrivialTypeSourceInfo(T),
                 clang::SC_None,NULL);
 
-            // Associate the value with this decl
+            // Associate the value with this decls
             clang_cgf->EmitParmDecl(*decls[i], clang_cgf->Builder.CreateBitCast(args[i+isMemberCall], 
                 clang_cgf->ConvertTypeForMem(T)), false, 0);
 
@@ -1015,6 +1021,12 @@ DLLEXPORT void *referenced_type(clang::Type *t)
 {
     return (void*)t->getPointeeType().getTypePtr();
 }
+
+DLLEXPORT void *getOriginalTypePtr(clang::ParmVarDecl *d)
+{
+  return (void*)d->getOriginalType().getTypePtr();
+}
+
 DLLEXPORT void *getPointerTo(clang::Type *t)
 {
     return (void*)clang_astcontext->getPointerType(clang::QualType(t,0)).getTypePtr();
@@ -1114,9 +1126,14 @@ DLLEXPORT void *CreateConstGEP1_32(llvm::IRBuilder<false> *builder, llvm::Value 
 DeduceTemplateArguments (FunctionTemplateDecl *FunctionTemplate, TemplateArgumentListInfo *ExplicitTemplateArgs, ArrayRef< Expr * > Args, FunctionDecl *&Specialization, sema::TemplateDeductionInfo &Info)
 */
 
-DLLEXPORT void *DeduceTemplateArguments(clang::FunctionTemplateDecl *tmplt, clang::Expr **args, uint32_t nargs)
+DLLEXPORT void *DeduceTemplateArguments(clang::FunctionTemplateDecl *tmplt, clang::Type **spectypes, uint32_t nspectypes, clang::Expr **args, uint32_t nargs)
 {
     clang::TemplateArgumentListInfo tali;
+    for (size_t i = 0; i < nspectypes; ++i) {
+      clang::QualType T(spectypes[i],0);
+      tali.addArgument(clang::TemplateArgumentLoc(clang::TemplateArgument(T),
+        clang_astcontext->getTrivialTypeSourceInfo(T)));
+    }
     clang::sema::TemplateDeductionInfo tdi((clang::SourceLocation()));
     clang::FunctionDecl *decl = NULL;
     clang_compiler->getSema().DeduceTemplateArguments(tmplt, &tali, ArrayRef<clang::Expr *>(args,nargs), decl, tdi);
